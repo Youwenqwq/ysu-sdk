@@ -1,0 +1,147 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## Project
+
+A Python SDK for Yanshan University's unified identity authentication (CAS) gateway at `cer.ysu.edu.cn` and the educational administration system (教务系统, `jwxt.ysu.edu.cn`).
+
+- `ysu_sdk.cas`: CAS login, MFA, credential persistence, and cross-`service` Service-Ticket issuance.
+- `ysu_sdk.jwxt`: Information queries for the educational administration system — grades, GPA stats, schedule (theory & experimental), exams, student info, training plan, academic completion, academic warnings, and student evaluation. **`submit_evaluation` is the sole write operation in this package** — every other public method is read-only. Don't add other write surfaces (course selection, applications) without an explicit ask; this SDK is intentionally narrow.
+
+The README is in Simplified Chinese; user-facing docstrings and exception messages should match.
+
+## Environment & commands
+
+- Python ≥ 3.12, managed via `uv` (see `.python-version` and `pyproject.toml`).
+- Install editable: `uv pip install -e .`
+- Runtime deps: `requests`, `pycryptodome`, `beautifulsoup4`. Build backend: `hatchling`.
+- There is **no** test suite, lint config, or CI in the repo. Don't claim to have run tests that don't exist; if you need to verify behavior, write a one-off script and say so. For smoke checks, prefer `uv run python -c "..."` so the project venv (with `pycryptodome` etc.) is on the path — bare `python` will likely fail with `ModuleNotFoundError: No module named 'Crypto'`.
+
+## Architecture
+
+Package `ysu_sdk` contains two subpackages:
+
+- `ysu_sdk.cas` — Public API is re-exported from `ysu_sdk.cas.__init__`.
+- `ysu_sdk.jwxt` — Public API is re-exported from `ysu_sdk.jwxt.__init__`.
+
+### CAS (`ysu_sdk.cas`)
+
+#### Two flow styles for login
+
+Both live on `CASClient`:
+
+1. **High-level / interactive** — `CASClient.login(username, password, mfa_handler=..., captcha_solver=...)`. Callbacks are *blocking*: they're invoked synchronously and must return the captcha/MFA string.
+2. **Step-wise / programmatic** — `fetch_captcha` → `login_step1` → (if `Step1Result.needs_mfa`) `request_mfa_code` → `submit_mfa_code`. Use this when you can't block (e.g. a web frontend).
+
+`Step1Result` is the bridge: `login_step1` classifies the response into `authenticated` / `needs_mfa` and never raises on the MFA path.
+
+#### Credential model — what's a CAS cookie
+
+`CASCredential` is the serializable bag of cookies that proves you have a valid TGC. The filter is enforced in `CASCredential.from_session` and is load-bearing:
+
+- `domain == cer.ysu.edu.cn` (constant `CAS_COOKIE_DOMAIN`), and
+- `path == "/"` or `path.startswith("/authserver")`.
+
+Per-service cookies (e.g. paths like `/personalInfo`) are explicitly **not** part of CAS credential — they belong to the target service's session. Don't loosen this filter without understanding why: same-named cookies on different paths (notably `JSESSIONID` on `/` vs `/personalInfo`) would otherwise clobber each other when round-tripped through JSON.
+
+Persistence keeps full `name/value/domain/path/secure/expires` per cookie — never use `session.cookies.get_dict()`, which loses path info. Files are chmod 0o600 on POSIX (best-effort on Windows / NTFS-mounted WSL).
+
+#### authorize() — the cookie sync invariant
+
+`CASClient.authorize(service_url, session=None)` issues an ST and lands per-service cookies on the *target* session (defaults to a fresh `requests.Session` so each business system stays isolated). Before returning, it calls `CASCredential.from_session(target).apply(self.session)` to **sync back** any rotated CAS-domain cookies (e.g. `happyVoyage`) to the client's own session. If you change `authorize()`, preserve this round-trip — otherwise long-lived `CASClient` instances drift out of sync with the gateway after a few authorizations.
+
+`get_service_ticket()` is the lower-level variant that just parses the ST out of the 302 `Location`. Most callers should use `authorize()`.
+
+#### MFA
+
+Only two methods, both verified against the live gateway: `sms` (code `"3"`, `reAuthDynamicCodeType`) and `cpdaily` (code `"5"`, `reAuthCpdailyDynamicCodeType`). Mappings are in `constants.py`. Don't add a method to `MFA_METHOD_TO_CODE` without confirming it works on the real server — the auth-code-type string is server-side enum and easy to get wrong.
+
+`submit_mfa_code` is deliberately defensive: it accepts a 3xx redirect chain *or* a 200 with success markers, and falls back to `is_authenticated()` before declaring failure. Multiple branches are intentional, not redundant — different gateway versions return different shapes.
+
+#### Crypto (`_crypto.py`)
+
+Mirrors the gateway's frontend AES-CBC: `pwdEncryptSalt` is the key (UTF-8 bytes, must be 16/24/32), random 16-char IV, and a random 64-char prefix is prepended to the password before encryption. Output is Base64. We use `secrets` (not `random`) — the frontend uses `Math.random()`, but there's no reason to copy weak randomness into our implementation.
+
+#### Parsing (`_parser.py`)
+
+Uses BeautifulSoup (`html.parser`) to handle the CAS login page's multiple `<form>` clusters. Each login mode (userNameLogin / dynamicLogin / fidoLogin / qrLogin) lives in its own `<form>`, and field names like `execution` or `lt` repeat across forms. `extract_hidden_fields` scopes extraction by the `cllt` hidden field to avoid cross-form collisions, and falls back to `id` when `name` is absent (required for `pwdEncryptSalt`, which has no `name` attribute). `extract_error_message` uses CSS selectors rather than multiple compiled regexes. `is_reauth_page` and `is_ip_frozen` remain simple substring checks — no parsing needed.
+
+### JWXT (`ysu_sdk.jwxt`)
+
+#### Dependency on CAS
+
+`JWXTClient` takes a `CASClient` instance in its constructor. On initialization, it calls `CASClient.authorize()` against the JWXT portal URL to establish per-service cookies (`JSESSIONID`, `_WEU`, etc.) on `jwxt.ysu.edu.cn`. The `JWXTClient` holds its own `requests.Session` — CAS and JWXT sessions are separate.
+
+#### `_WEU` per-app refresh — `_ensure_weu` invariant
+
+EMAP gates each *application* (成绩查询, 课表, 评教, …) behind its own `_WEU` cookie, served by `appShow.do?id=<APP_ID>`. The cookie is single-app: switching apps without refreshing leaves stale `_WEU` and the next API call returns `code=1`/redirects.
+
+Every public query method **must** call `self._ensure_weu(APP_IDS[<app>])` before its first POST. The helper unconditionally GETs `appShow.do?id=<APP_ID>` to make the gateway re-issue `_WEU` for the target app — it does **not** check the current cookie. That's intentional: the cookie's app-binding is opaque from the client side, so we can't tell whether the existing `_WEU` matches without paying the round-trip anyway. When adding a new query, mirror this pattern — a missing `_ensure_weu` is the most common bug shape on this codebase.
+
+#### EMAP platform — multiple request formats
+
+The 教务系统 is built on the 金智教育 EMAP platform. Different functional modules use different API request patterns:
+
+1. **Standard EMAP `querySetting`** — JSON array of filter conditions sent as form data. Used by: 成绩查询 (`cjcx`), 学生基本信息 (`xsjbxx`), 待评问卷列表 (`dpwj`).
+2. **`requestParamStr`** — JSON object (or array) sent as a single form field. Used by: 考试安排 (`wdksap`), 评教提交/预检 (`commit_answer`, `calculate_score`).
+3. **Direct form parameters** — Plain key-value pairs like `XNXQDM=2025-2026-2`. Used by: 课表查询 (`wdkb`, `wdkb_sy`), 学业完成 (`xywc`), 评教类型/题目 (`pjlx`, `wjtxxx`).
+4. **Multi-step chained APIs** — Some features require calling one API to get an identifier (e.g. `PYFADM`), then a second API with that identifier. Used by: 培养方案 (`pyfa` → `pyfa_courses`), 评教 (`dpwj` → `wjtxxx` → `calculate_score` → `commit_answer`).
+
+`JWXTClient` methods handle these differences internally. Each query method constructs the correct request format for its target API.
+
+#### `_post` is the choke point
+
+All API calls go through `self._post(path, data)`, which (a) builds the URL via `_build_api_url`, (b) sends the form POST, (c) detects login expiry (HTTP 401/403 or redirect to CAS login → `NotLoggedInError`), (d) decodes the EMAP envelope, (e) raises `JWXTProtocolError` on malformed JSON / missing `datas`, and (f) raises `JWXTBusinessError(code, msg, url)` on non-zero `code`. **Never call `self.session.post` directly from query methods** — bypassing `_post` skips all five checks. The current code routes every public POST through `_post`; preserve this when adding new methods.
+
+#### Response parsing
+
+All EMAP APIs return a standard envelope:
+```json
+{"code": "0", "datas": {"apiName": {"rows": [...], "totalSize": N}}}
+```
+
+`_extract_rows(datas, key)` normalizes extraction of the `rows` array. Parser functions (`_parse_grade`, `_parse_course`, …) map API field names to structured dataclass instances. Each dataclass carries a `raw` field with the original response dict for forward compatibility.
+
+Module-level helpers reduce parsing duplication:
+
+- `_to_bool(val)` — converts EMAP truthy tokens (`"1"`, `"是"`, `"true"`, `"True"`) to `bool`. Use this for any boolean field; don't reinvent `str(...) in (...)` chains in new parsers.
+- `_COURSE_CATEGORY_TO_KBLB` — maps the public `"all"/"theory"/"experiment"` enum to EMAP's `KBLB` values (`"0"/"1"/"2"`).
+- `_evaluation_form_data(...)` — builds the `requestParamStr` payload shared by `calculate_evaluation_score` and `submit_evaluation`. The two endpoints take the same body shape; this helper is the single source of truth.
+
+#### Schedule/unscheduled-courses share a private impl
+
+`query_schedule_experimental` and `query_unscheduled_courses` differ only in API path and `_extract_rows` key — both POST `XNXQDM/XH/KBLB` against the same `wdkb_sy` `_WEU`. The shared body lives in `_query_courses_by_kblb(*, path_key, row_key, term, student_id, course_category)`. If you add another `KBLB`-driven endpoint, route it through this helper.
+
+#### Evaluation — multi-step, write-once
+
+The evaluation flow is the only multi-step *write* path:
+
+```
+query_evaluation_types  →  query_pending_evaluations  →  get_evaluation_detail
+                        →  calculate_evaluation_score (predicate)
+                        →  submit_evaluation (write — irreversible)
+```
+
+`calculate_evaluation_score` and `submit_evaluation` accept `group_no` and `eval_type` for forward compatibility, but the current server payload doesn't use them — both methods `del group_no, eval_type` and rely on `_evaluation_form_data`. Don't drop these parameters from the signatures: removing them is a breaking API change, and the EMAP server is known to revisit fields between releases.
+
+#### Exception hierarchy
+
+`JWXTError` is the base. Three concrete subclasses:
+
+- `NotLoggedInError` — session expired (HTTP 401/403, or redirect to CAS login). Raised by `_post`.
+- `JWXTProtocolError` — response format violates the EMAP envelope (non-JSON, missing `datas`, network/HTTP error). Raised by `_post` and a few callers when `_extract_rows` returns nothing where rows are required.
+- `JWXTBusinessError(code, msg, url)` — server returned a structurally valid envelope with non-zero `code`. The original motivation was the evaluation system's `code=1 msg=未到评教时间` rejection: that's a *business-rule* refusal, not a protocol failure, and callers need to programmatically distinguish it (e.g. surfacing the message to the user vs. retrying).
+
+`JWXTBusinessError` is **not** a subclass of `JWXTProtocolError` — they're siblings under `JWXTError`. Code that previously caught `JWXTProtocolError` to handle "any server-side rejection" needs updating: catch `JWXTBusinessError` for business rejections, leave `JWXTProtocolError` for actual protocol corruption. When raising new exceptions, pick the layer that matches: malformed JSON → protocol; valid JSON, server says "no" → business.
+
+#### Constants layout
+
+`constants.py` groups `APP_IDS` and `API_PATHS` by feature with `# —— … ——` headers (成绩查询 / 课表 / 学籍 / 考试 / 学生评教). Entries marked `（未使用）` are kept as references for future work but not wired through `JWXTClient`. When adding a new endpoint, place it under the matching header and add a one-line Chinese comment describing the API.
+
+## Conventions
+
+- Docstrings and user-facing strings (exceptions, README) are in Simplified Chinese; identifiers and code comments default to English.
+- `from __future__ import annotations` everywhere. Dataclasses use `slots=True`; immutable ones use `frozen=True`.
+- Module-private modules are prefixed with `_` (`_crypto.py`, `_parser.py`) and not re-exported from `__init__.py`.
+- Exception hierarchy lives in `exceptions.py`; everything inherits from `CASError` (for `cas/`) or `JWXTError` (for `jwxt/`). Add new exception types there rather than raising `Exception` / `ValueError`.

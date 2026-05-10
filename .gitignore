@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+*.egg
+.eggs/
+
+# Build
+build/
+dist/
+*.whl
+
+# Virtualenv
+.venv/
+venv/
+
+# uv
+.uv/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# Local credential cache (do NOT commit real session data)
+*.cas.json
+session.pkl
+
+# OS
+.DS_Store
+Thumbs.db
