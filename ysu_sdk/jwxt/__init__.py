@@ -10,7 +10,9 @@ from ysu_sdk.jwxt.exceptions import (
 from ysu_sdk.jwxt.types import (
     AcademicCompletion,
     AcademicWarning,
+    ClassPeriod,
     Course,
+    CurrentWeek,
     EvaluationAnswer,
     EvaluationDetail,
     EvaluationTask,
@@ -21,6 +23,7 @@ from ysu_sdk.jwxt.types import (
     Question,
     QuestionOption,
     StudentInfo,
+    TermCalendar,
     TrainingPlan,
 )
 
@@ -32,7 +35,9 @@ __all__ = [
     "JWXTBusinessError",
     "AcademicCompletion",
     "AcademicWarning",
+    "ClassPeriod",
     "Course",
+    "CurrentWeek",
     "EvaluationAnswer",
     "EvaluationDetail",
     "EvaluationTask",
@@ -43,5 +48,6 @@ __all__ = [
     "Question",
     "QuestionOption",
     "StudentInfo",
+    "TermCalendar",
     "TrainingPlan",
 ]

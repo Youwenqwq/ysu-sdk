@@ -31,6 +31,9 @@ API_PATHS = {
     "wdkb_dkkc": "wdkb/modules/xskcb/xsdkkc.do",                                 # 学生调课课程（未使用）
     "wdkb_sy": "syxkjg/modules/wdkb/cxxskb.do",                                  # 我的课表（实验课）
     "wdkb_sy_unscheduled": "syxkjg/modules/wdkb/cxxsllsywpk.do",                 # 学生理论实验未排课
+    "jc": "wdkb/modules/jshkcb/jc.do",                                           # 节次配置（每节课的起止时间）
+    "dqzc": "wdkb/modules/jshkcb/dqzc.do",                                       # 指定日期对应的教学周次与星期
+    "cxxljc": "wdkb/modules/xskcb/cxxljc.do",                                    # 学期校历配置（起始日期、总周次、教学周次等）
     "kcbcx": "kcbcx/KbcxController/querybjkb.do",                                # 全校班级课表查询（未使用）
 
     # —— 学籍 / 培养方案 / 学业 ——

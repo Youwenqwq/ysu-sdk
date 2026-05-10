@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import datetime
 import json
 import logging
 from typing import Any
@@ -17,7 +18,9 @@ from ysu_sdk.jwxt.exceptions import JWXTBusinessError, JWXTProtocolError, NotLog
 from ysu_sdk.jwxt.types import (
     AcademicCompletion,
     AcademicWarning,
+    ClassPeriod,
     Course,
+    CurrentWeek,
     EvaluationAnswer,
     EvaluationDetail,
     EvaluationTask,
@@ -28,6 +31,7 @@ from ysu_sdk.jwxt.types import (
     Question,
     QuestionOption,
     StudentInfo,
+    TermCalendar,
     TrainingPlan,
 )
 
@@ -443,6 +447,75 @@ class JWXTClient:
         rows = _extract_rows(datas, row_key)
         return [_parse_course(r) for r in rows]
 
+    def query_class_periods(self) -> list[ClassPeriod]:
+        """查询课表节次配置（每节课的起止时间）。
+
+        返回教务系统全局的节次时刻表，与 :class:`Course` 的
+        ``start_section``/``end_section`` 配套使用，可把节次序号映射到具体
+        上下课时间。该接口不区分学期，是系统级元数据。
+
+        Returns:
+            节次列表（服务端默认按节次序号升序返回）。
+        """
+        self._ensure_weu(APP_IDS["wdkb"])
+        datas = self._post(API_PATHS["jc"])
+        rows = _extract_rows(datas, "jc")
+        return [_parse_class_period(r) for r in rows]
+
+    def query_term_calendar(
+        self,
+        *,
+        term: str | None = None,
+    ) -> TermCalendar:
+        """查询学期校历配置（学期起始日期、总周次、教学周次等）。
+
+        Args:
+            term: 学年学期，如 ``"2025-2026-2"``；为 ``None`` 则使用当前学期。
+
+        Returns:
+            :class:`TermCalendar`，描述该学期的周次结构。
+        """
+        self._ensure_weu(APP_IDS["wdkb"])
+
+        if term is None:
+            term = self._get_current_term(APP_IDS["studentWdksapApp"], "wdksap_dqxnxq")
+        xn, xq = term.rsplit("-", 1)
+
+        datas = self._post(API_PATHS["cxxljc"], {"XN": xn, "XQ": xq})
+        rows = _extract_rows(datas, "cxxljc")
+        if not rows:
+            raise JWXTProtocolError("query_term_calendar returned empty result")
+        return _parse_term_calendar(rows[0])
+
+    def query_current_week(
+        self,
+        *,
+        term: str | None = None,
+        date: str | None = None,
+    ) -> CurrentWeek:
+        """查询指定日期所属的教学周次与星期。
+
+        Args:
+            term: 学年学期，如 ``"2025-2026-2"``；为 ``None`` 则使用当前学期。
+            date: 日期字符串（``YYYY-MM-DD``）；为 ``None`` 则使用今天。
+
+        Returns:
+            :class:`CurrentWeek`，含周次（``week``）与星期几（``weekday``）。
+        """
+        self._ensure_weu(APP_IDS["wdkb"])
+
+        if term is None:
+            term = self._get_current_term(APP_IDS["studentWdksapApp"], "wdksap_dqxnxq")
+        if date is None:
+            date = datetime.date.today().isoformat()
+        xn, xq = term.rsplit("-", 1)
+
+        datas = self._post(API_PATHS["dqzc"], {"XN": xn, "XQ": xq, "RQ": date})
+        rows = _extract_rows(datas, "dqzc")
+        if not rows:
+            raise JWXTProtocolError("query_current_week returned empty result")
+        return _parse_current_week(rows[0])
+
     # ──────────────────────────────────────────────────────────────────── #
     # 考试安排
     # ──────────────────────────────────────────────────────────────────── #
@@ -824,6 +897,47 @@ def _parse_course(raw: dict[str, Any]) -> Course:
         weeks=str(raw.get("ZCMC") or ""),
         credit=str(raw.get("XF") or ""),
         course_type=str(raw.get("KCXZDM") or ""),
+        raw=raw,
+    )
+
+
+def _parse_class_period(raw: dict[str, Any]) -> ClassPeriod:
+    return ClassPeriod(
+        name=str(raw.get("MC") or ""),
+        section=int(raw.get("DM") or raw.get("PX") or 0),
+        start_time=str(raw.get("KSSJ") or ""),
+        end_time=str(raw.get("JSSJ") or ""),
+        is_in_use=_to_bool(raw.get("SFSY")),
+        raw=raw,
+    )
+
+
+def _combine_term(raw: dict[str, Any]) -> str:
+    """把响应中的 ``XN`` 与 ``XQ`` 合成 SDK 通用的 ``"YYYY-YYYY-N"`` 串。"""
+    xn = str(raw.get("XN") or "")
+    xq = str(raw.get("XQ") or "")
+    return f"{xn}-{xq}" if xn and xq else (xn or xq)
+
+
+def _parse_term_calendar(raw: dict[str, Any]) -> TermCalendar:
+    start = str(raw.get("XQKSRQ") or "")
+    return TermCalendar(
+        term=_combine_term(raw),
+        start_date=start.split()[0] if start else "",
+        total_weeks=int(raw.get("ZZC") or 0),
+        teaching_weeks=int(raw.get("ZJXZC") or 0),
+        is_in_use=_to_bool(raw.get("SFSY")),
+        raw=raw,
+    )
+
+
+def _parse_current_week(raw: dict[str, Any]) -> CurrentWeek:
+    rq = str(raw.get("RQ") or "")
+    return CurrentWeek(
+        week=int(raw.get("ZC") or 0),
+        weekday=int(raw.get("XQJ") or 0),
+        term=_combine_term(raw),
+        date=rq.split()[0] if rq else "",
         raw=raw,
     )
 

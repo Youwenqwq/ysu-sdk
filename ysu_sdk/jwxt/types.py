@@ -37,6 +37,71 @@ class Course:
 
 
 @dataclass(frozen=True, slots=True)
+class ClassPeriod:
+    """课表节次配置。
+
+    描述教务系统全局的节次时刻表，可与 :class:`Course` 的
+    ``start_section``/``end_section`` 字段联用，把节次序号映射到具体的
+    上下课时间。
+
+    Attributes:
+        name: 节次名称（如 "第1节"）
+        section: 节次序号（对应 :attr:`Course.start_section`）
+        start_time: 开始时间（``HH:MM``）
+        end_time: 结束时间（``HH:MM``）
+        is_in_use: 该节次是否启用
+    """
+
+    name: str = ""
+    section: int = 0
+    start_time: str = ""
+    end_time: str = ""
+    is_in_use: bool = False
+    raw: dict[str, Any] = field(default_factory=dict, repr=False)
+
+
+@dataclass(frozen=True, slots=True)
+class TermCalendar:
+    """学期校历配置。
+
+    描述一个学年学期的周次结构（总周次、正常教学周次、起始日期等），可以
+    与 :class:`CurrentWeek` 配合使用，把日期换算为教学周次。
+
+    Attributes:
+        term: 学年学期（``"YYYY-YYYY-N"``，如 ``"2025-2026-2"``）
+        start_date: 学期开始日期（``YYYY-MM-DD``）
+        total_weeks: 学期总周次（含考试 / 节假日等）
+        teaching_weeks: 正常教学周次
+        is_in_use: 该学期校历是否启用
+    """
+
+    term: str = ""
+    start_date: str = ""
+    total_weeks: int = 0
+    teaching_weeks: int = 0
+    is_in_use: bool = False
+    raw: dict[str, Any] = field(default_factory=dict, repr=False)
+
+
+@dataclass(frozen=True, slots=True)
+class CurrentWeek:
+    """指定日期所属的教学周次与星期。
+
+    Attributes:
+        week: 教学周次（学期第几周）
+        weekday: 星期几（``1`` = 周一、…、``7`` = 周日）
+        term: 学年学期
+        date: 查询的日期（``YYYY-MM-DD``）
+    """
+
+    week: int = 0
+    weekday: int = 0
+    term: str = ""
+    date: str = ""
+    raw: dict[str, Any] = field(default_factory=dict, repr=False)
+
+
+@dataclass(frozen=True, slots=True)
 class Exam:
     """考试安排信息。
 
