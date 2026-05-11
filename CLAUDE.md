@@ -7,7 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 A Python SDK for Yanshan University's unified identity authentication (CAS) gateway at `cer.ysu.edu.cn` and the educational administration system (教务系统, `jwxt.ysu.edu.cn`).
 
 - `ysu_sdk.cas`: CAS login, MFA, credential persistence, and cross-`service` Service-Ticket issuance.
-- `ysu_sdk.jwxt`: Information queries for the educational administration system — grades, GPA stats, schedule (theory & experimental), exams, student info, training plan, academic completion, academic warnings, and student evaluation. **`submit_evaluation` is the sole write operation in this package** — every other public method is read-only. Don't add other write surfaces (course selection, applications) without an explicit ask; this SDK is intentionally narrow.
+- `ysu_sdk.jwxt`: Information queries for the educational administration system — grades, grade statistics/distribution/ranking (per teaching class or whole course), GPA stats, schedule (theory & experimental), exams, student info, training plan, academic completion, academic warnings, and student evaluation. **`submit_evaluation` is the sole write operation in this package** — every other public method is read-only. Don't add other write surfaces (course selection, applications) without an explicit ask; this SDK is intentionally narrow.
 
 The README is in Simplified Chinese; user-facing docstrings and exception messages should match.
 
@@ -107,11 +107,17 @@ Module-level helpers reduce parsing duplication:
 
 - `_to_bool(val)` — converts EMAP truthy tokens (`"1"`, `"是"`, `"true"`, `"True"`) to `bool`. Use this for any boolean field; don't reinvent `str(...) in (...)` chains in new parsers.
 - `_COURSE_CATEGORY_TO_KBLB` — maps the public `"all"/"theory"/"experiment"` enum to EMAP's `KBLB` values (`"0"/"1"/"2"`).
+- `_TJLX_TO_SCOPE` — maps EMAP's `TJLX` (`"01"`/`"02"`) to the public `scope` (`"class"`/`"course"`) used on the grade-statistics dataclasses.
 - `_evaluation_form_data(...)` — builds the `requestParamStr` payload shared by `calculate_evaluation_score` and `submit_evaluation`. The two endpoints take the same body shape; this helper is the single source of truth.
+- `_build_grade_stats_request(...)` — builds the `JXBID`/`KCH`/`XNXQDM`/`TJLX` form body shared by `query_grade_statistics` / `query_grade_distribution` / `query_grade_ranking`. Enforces the `class_id` vs `course_code` mutex (exactly one must be provided) and substitutes `JXBID="*"` for the course-overall (`TJLX=02`) path.
 
 #### Schedule/unscheduled-courses share a private impl
 
 `query_schedule_experimental` and `query_unscheduled_courses` differ only in API path and `_extract_rows` key — both POST `XNXQDM/XH/KBLB` against the same `wdkb_sy` `_WEU`. The shared body lives in `_query_courses_by_kblb(*, path_key, row_key, term, student_id, course_category)`. If you add another `KBLB`-driven endpoint, route it through this helper.
+
+#### Grade statistics/distribution/ranking — `JXBID` vs `KCH` dispatch
+
+`query_grade_statistics` (`jxbcjtjcx`), `query_grade_distribution` (`jxbcjfbcx`), and `query_grade_ranking` (`jxbxspmcx`) are three sibling APIs that all live behind the `cjcx` `_WEU` and share the same dispatch shape: the caller picks **either** `class_id` (teaching-class scope, `TJLX=01`) or `course_code` (whole-course scope, `TJLX=02`), and the body is `JXBID/KCH/XNXQDM/TJLX`. The mutex is enforced in `_build_grade_stats_request` — providing both or neither raises `ValueError`. The two scopes are surfaced to callers as `scope="class"` / `scope="course"` on the returned dataclass via `_TJLX_TO_SCOPE`. For `TJLX=02`, the server expects `JXBID="*"` (a sentinel, not a wildcard pattern); the helper substitutes that automatically — don't ask callers to pass `"*"` themselves. `query_grade_ranking` additionally takes `student_id` (defaults to the logged-in user) and adds `XH` to the body; the other two don't.
 
 #### Evaluation — multi-step, write-once
 

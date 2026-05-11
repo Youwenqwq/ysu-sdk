@@ -130,6 +130,7 @@ class Grade:
     Attributes:
         course_name: 课程名称
         course_code: 课程号
+        class_id: 教学班ID
         score: 百分制成绩
         grade_level: 等级制成绩
         grade_point: 绩点
@@ -153,6 +154,7 @@ class Grade:
 
     course_name: str
     course_code: str = ""
+    class_id: str = ""
     score: str = ""
     grade_level: str = ""
     grade_point: str = ""
@@ -172,6 +174,99 @@ class Grade:
     special_reason: str = ""
     is_degree_course: bool = False
     project_name: str = ""
+    raw: dict[str, Any] = field(default_factory=dict, repr=False)
+
+
+@dataclass(frozen=True, slots=True)
+class GradeStatistics:
+    """成绩统计信息（最高分 / 最低分 / 平均分）。
+
+    对应原始接口 ``jxbcjtjcx``。``scope`` 区分两种统计口径：
+
+    - ``"class"`` 教学班统计（``TJLX=01``）：针对单个 ``class_id`` 的统计；
+    - ``"course"`` 课程总体统计（``TJLX=02``）：针对单个 ``course_code``、
+      聚合所有教学班，此时服务端返回的 ``class_id`` 为 ``"*"``。
+
+    Attributes:
+        scope: 统计口径，``"class"`` 或 ``"course"``
+        term: 学年学期
+        class_id: 教学班ID（课程总体统计下为 ``"*"``）
+        course_code: 课程号
+        highest_score: 最高分
+        lowest_score: 最低分
+        average_score: 平均分
+    """
+
+    scope: str = ""
+    term: str = ""
+    class_id: str = ""
+    course_code: str = ""
+    highest_score: float = 0.0
+    lowest_score: float = 0.0
+    average_score: float = 0.0
+    raw: dict[str, Any] = field(default_factory=dict, repr=False)
+
+
+@dataclass(frozen=True, slots=True)
+class GradeDistribution:
+    """成绩分布信息（按等级分桶的人数）。
+
+    对应原始接口 ``jxbcjfbcx``。每条记录代表一个等级及该等级的人数。
+    ``scope`` 区分教学班统计（``TJLX=01``）与课程总体统计（``TJLX=02``），
+    后者下 ``class_id`` 为 ``"*"``。
+
+    Attributes:
+        scope: 统计口径，``"class"`` 或 ``"course"``
+        term: 学年学期
+        class_id: 教学班ID（课程总体统计下为 ``"*"``）
+        course_code: 课程号
+        level_code: 等级代码（``"01"`` 优秀、``"02"`` 良好、``"03"`` 中等、
+            ``"04"`` 及格、``"05"`` 不及格）
+        level_name: 等级名称
+        count: 该等级人数
+    """
+
+    scope: str = ""
+    term: str = ""
+    class_id: str = ""
+    course_code: str = ""
+    level_code: str = ""
+    level_name: str = ""
+    count: int = 0
+    raw: dict[str, Any] = field(default_factory=dict, repr=False)
+
+
+@dataclass(frozen=True, slots=True)
+class GradeRanking:
+    """学生成绩排名信息。
+
+    对应原始接口 ``jxbxspmcx``。``scope`` 区分排名口径：
+
+    - ``"class"`` 教学班内排名（``TJLX=01``）：在指定 ``class_id`` 中的名次；
+    - ``"course"`` 课程总体排名（``TJLX=02``）：在指定 ``course_code`` 所有
+      教学班的合并名次，此时 ``class_id`` 为 ``"*"``。
+
+    Attributes:
+        scope: 排名口径，``"class"`` 或 ``"course"``
+        term: 学年学期
+        student_id: 学号
+        class_id: 教学班ID（课程总体排名下为 ``"*"``）
+        course_code: 课程号
+        score: 学生本人成绩
+        rank: 当前名次
+        total: 参与排名的总人数
+        ranking_type: 服务端 ``PMLX`` 字段（如 ``"JXB"``），用于调试
+    """
+
+    scope: str = ""
+    term: str = ""
+    student_id: str = ""
+    class_id: str = ""
+    course_code: str = ""
+    score: float = 0.0
+    rank: int = 0
+    total: int = 0
+    ranking_type: str = ""
     raw: dict[str, Any] = field(default_factory=dict, repr=False)
 
 

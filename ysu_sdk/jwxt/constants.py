@@ -24,6 +24,9 @@ API_PATHS = {
     # —— 成绩查询 ——
     "cjcx": "cjcx/modules/cjcx/xscjcx.do",                                       # 学生成绩
     "cjcx_gpa": "cjcx/modules/cjcx/cxzxfaxfjd.do",                               # 在校学分加权积点（GPA / 学分统计）
+    "jxbcjtjcx": "cjcx/modules/cjcx/jxbcjtjcx.do",                               # 成绩统计（教学班/课程总体的最高分、最低分、平均分）
+    "jxbcjfbcx": "cjcx/modules/cjcx/jxbcjfbcx.do",                               # 成绩分布（教学班/课程总体的等级人数分布）
+    "jxbxspmcx": "cjcx/modules/cjcx/jxbxspmcx.do",                               # 学生成绩排名（教学班内 / 课程总体）
 
     # —— 课表 ——
     "wdkb": "wdkb/modules/xskcb/cxxszhxqkb.do",                                  # 我的课表（理论课，按学年学期）

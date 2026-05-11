@@ -28,6 +28,9 @@ from ysu_sdk.jwxt.types import (
     Exam,
     GPAStats,
     Grade,
+    GradeDistribution,
+    GradeRanking,
+    GradeStatistics,
     Question,
     QuestionOption,
     StudentInfo,
@@ -125,6 +128,28 @@ _COURSE_CATEGORY_TO_KBLB: dict[str, str] = {
     "theory": "1",
     "experiment": "2",
 }
+
+# jxbcjtjcx / jxbcjfbcx / jxbxspmcx 的 TJLX 到对外 ``scope`` 的映射。
+_TJLX_TO_SCOPE: dict[str, str] = {"01": "class", "02": "course"}
+
+
+def _build_grade_stats_request(
+    *,
+    term: str,
+    class_id: str | None,
+    course_code: str | None,
+) -> dict[str, str]:
+    """为 ``jxbcjtjcx`` / ``jxbcjfbcx`` / ``jxbxspmcx`` 构造请求体。
+
+    ``class_id`` 与 ``course_code`` 必须仅提供其一：
+    - 仅 ``class_id`` → ``TJLX=01`` 教学班统计；
+    - 仅 ``course_code`` → ``TJLX=02`` 课程总体统计，并把 ``JXBID`` 置为 ``"*"``。
+    """
+    if (class_id is None) == (course_code is None):
+        raise ValueError("class_id 与 course_code 须仅提供其一")
+    if class_id is not None:
+        return {"JXBID": class_id, "XNXQDM": term, "TJLX": "01"}
+    return {"JXBID": "*", "KCH": str(course_code), "XNXQDM": term, "TJLX": "02"}
 
 
 class JWXTClient:
@@ -330,6 +355,138 @@ class JWXTClient:
         if not rows:
             raise JWXTProtocolError("query_gpa_stats returned empty result")
         return _parse_gpa_stats(rows[0])
+
+    def query_grade_statistics(
+        self,
+        *,
+        term: str | None = None,
+        class_id: str | None = None,
+        course_code: str | None = None,
+    ) -> GradeStatistics:
+        """查询成绩统计（最高分 / 最低分 / 平均分）。
+
+        ``class_id`` 与 ``course_code`` 必须仅提供其一：
+
+        - 仅提供 ``class_id``：按教学班统计（``TJLX=01``），范围限定为
+          该教学班；
+        - 仅提供 ``course_code``：按课程总体统计（``TJLX=02``），聚合该
+          课程在指定学期的所有教学班，返回结果中 ``class_id`` 为 ``"*"``。
+
+        Args:
+            term: 学年学期，如 ``"2025-2026-2"``；为 ``None`` 则查询当前学期。
+            class_id: 教学班ID（``JXBID``），可从 :meth:`query_grades`
+                返回的 ``Grade.class_id`` 取得。
+            course_code: 课程号（``KCH``）。
+
+        Returns:
+            :class:`GradeStatistics`
+
+        Raises:
+            ValueError: ``class_id`` 与 ``course_code`` 同时提供或同时为空。
+            JWXTProtocolError: 服务端返回空结果。
+        """
+        self._ensure_weu(APP_IDS["cjcx"])
+
+        if term is None:
+            term = self._get_current_term(
+                APP_IDS["studentWdksapApp"], "wdksap_dqxnxq"
+            )
+        payload = _build_grade_stats_request(
+            term=term, class_id=class_id, course_code=course_code
+        )
+        datas = self._post(API_PATHS["jxbcjtjcx"], payload)
+        rows = _extract_rows(datas, "jxbcjtjcx")
+        if not rows:
+            raise JWXTProtocolError("query_grade_statistics returned empty result")
+        return _parse_grade_statistics(rows[0])
+
+    def query_grade_distribution(
+        self,
+        *,
+        term: str | None = None,
+        class_id: str | None = None,
+        course_code: str | None = None,
+    ) -> list[GradeDistribution]:
+        """查询成绩分布（按等级分桶的人数）。
+
+        ``class_id`` 与 ``course_code`` 必须仅提供其一：
+
+        - 仅提供 ``class_id``：按教学班统计（``TJLX=01``）；
+        - 仅提供 ``course_code``：按课程总体统计（``TJLX=02``），结果中
+          ``class_id`` 为 ``"*"``。
+
+        Args:
+            term: 学年学期；为 ``None`` 则查询当前学期。
+            class_id: 教学班ID（``JXBID``）。
+            course_code: 课程号（``KCH``）。
+
+        Returns:
+            按等级代码升序排列的分布列表（``"01"`` 优秀 → ``"05"`` 不及格）。
+
+        Raises:
+            ValueError: ``class_id`` 与 ``course_code`` 同时提供或同时为空。
+        """
+        self._ensure_weu(APP_IDS["cjcx"])
+
+        if term is None:
+            term = self._get_current_term(
+                APP_IDS["studentWdksapApp"], "wdksap_dqxnxq"
+            )
+        payload = _build_grade_stats_request(
+            term=term, class_id=class_id, course_code=course_code
+        )
+        payload["*order"] = "+DJDM"
+        datas = self._post(API_PATHS["jxbcjfbcx"], payload)
+        rows = _extract_rows(datas, "jxbcjfbcx")
+        return [_parse_grade_distribution(r) for r in rows]
+
+    def query_grade_ranking(
+        self,
+        *,
+        term: str | None = None,
+        student_id: str | None = None,
+        class_id: str | None = None,
+        course_code: str | None = None,
+    ) -> GradeRanking:
+        """查询学生成绩排名。
+
+        ``class_id`` 与 ``course_code`` 必须仅提供其一：
+
+        - 仅提供 ``class_id``：教学班内排名（``TJLX=01``）；
+        - 仅提供 ``course_code``：课程总体排名（``TJLX=02``），聚合该课程
+          所有教学班，返回结果中 ``class_id`` 为 ``"*"``。
+
+        Args:
+            term: 学年学期；为 ``None`` 则查询当前学期。
+            student_id: 学号；为 ``None`` 则自动查询当前登录学生信息。
+            class_id: 教学班ID（``JXBID``）。
+            course_code: 课程号（``KCH``）。
+
+        Returns:
+            :class:`GradeRanking`
+
+        Raises:
+            ValueError: ``class_id`` 与 ``course_code`` 同时提供或同时为空。
+            JWXTProtocolError: 服务端返回空结果。
+        """
+        if student_id is None:
+            student_id = self.query_student_info().student_id
+
+        self._ensure_weu(APP_IDS["cjcx"])
+
+        if term is None:
+            term = self._get_current_term(
+                APP_IDS["studentWdksapApp"], "wdksap_dqxnxq"
+            )
+        payload = _build_grade_stats_request(
+            term=term, class_id=class_id, course_code=course_code
+        )
+        payload["XH"] = student_id
+        datas = self._post(API_PATHS["jxbxspmcx"], payload)
+        rows = _extract_rows(datas, "jxbxspmcx")
+        if not rows:
+            raise JWXTProtocolError("query_grade_ranking returned empty result")
+        return _parse_grade_ranking(rows[0])
 
     # ──────────────────────────────────────────────────────────────────── #
     # 课表查询
@@ -842,6 +999,7 @@ def _parse_grade(raw: dict[str, Any]) -> Grade:
     return Grade(
         course_name=str(raw.get("XSKCM") or raw.get("KCM") or ""),
         course_code=str(raw.get("XSKCH") or raw.get("KCH") or ""),
+        class_id=str(raw.get("JXBID") or ""),
         score=score,
         grade_level=str(raw.get("XSZCJMC") or ""),
         grade_point=str(raw.get("XFJD") or ""),
@@ -881,6 +1039,47 @@ def _parse_gpa_stats(raw: dict[str, Any]) -> GPAStats:
         weighted_avg=str(raw.get("JQPJF") or ""),
         arithmetic_avg=str(raw.get("SSPJF") or ""),
         degree_weighted_avg=str(raw.get("XWKJQPJF") or ""),
+        raw=raw,
+    )
+
+
+def _parse_grade_statistics(raw: dict[str, Any]) -> GradeStatistics:
+    return GradeStatistics(
+        scope=_TJLX_TO_SCOPE.get(str(raw.get("TJLX") or ""), ""),
+        term=str(raw.get("XNXQDM") or ""),
+        class_id=str(raw.get("JXBID") or ""),
+        course_code=str(raw.get("KCH") or ""),
+        highest_score=float(raw.get("ZGF") or 0),
+        lowest_score=float(raw.get("ZDF") or 0),
+        average_score=float(raw.get("PJF") or 0),
+        raw=raw,
+    )
+
+
+def _parse_grade_distribution(raw: dict[str, Any]) -> GradeDistribution:
+    return GradeDistribution(
+        scope=_TJLX_TO_SCOPE.get(str(raw.get("TJLX") or ""), ""),
+        term=str(raw.get("XNXQDM") or ""),
+        class_id=str(raw.get("JXBID") or ""),
+        course_code=str(raw.get("KCH") or ""),
+        level_code=str(raw.get("DJDM") or ""),
+        level_name=str(raw.get("DJDM_DISPLAY") or ""),
+        count=int(raw.get("DJSL") or 0),
+        raw=raw,
+    )
+
+
+def _parse_grade_ranking(raw: dict[str, Any]) -> GradeRanking:
+    return GradeRanking(
+        scope=_TJLX_TO_SCOPE.get(str(raw.get("TJLX") or ""), ""),
+        term=str(raw.get("XNXQDM") or ""),
+        student_id=str(raw.get("XH") or ""),
+        class_id=str(raw.get("JXBID") or ""),
+        course_code=str(raw.get("KCH") or ""),
+        score=float(raw.get("PMF") or 0),
+        rank=int(raw.get("PM") or 0),
+        total=int(raw.get("ZRS") or 0),
+        ranking_type=str(raw.get("PMLX") or ""),
         raw=raw,
     )
 

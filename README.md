@@ -65,6 +65,34 @@ schedule = jwxt.query_schedule(term="2024-2025-2")
 exams = jwxt.query_exams(term="2024-2025-2")
 ```
 
+### 成绩统计 / 分布 / 排名
+
+`query_grades` 返回的每条 `Grade` 携带 `class_id`（教学班 ID），可直接喂给下面三个接口
+进一步查询该课程的统计数据。每个接口都支持两种统计口径：
+
+- **教学班**（`TJLX=01`）：传 `class_id`，结果限定在该教学班；
+- **课程总体**（`TJLX=02`）：传 `course_code`，聚合该课程在指定学期的所有教学班，
+  返回值中 `class_id` 为 `"*"`。
+
+`class_id` 与 `course_code` 必须**仅提供其一**，否则抛 `ValueError`。
+
+```python
+g = jwxt.query_grades(term="2025-2026-2")[0]
+
+# 1) 最高 / 最低 / 平均分
+class_stat = jwxt.query_grade_statistics(class_id=g.class_id)        # 教学班
+course_stat = jwxt.query_grade_statistics(course_code=g.course_code) # 课程总体
+
+# 2) 等级分布（优秀 / 良好 / 中等 / 及格 / 不及格 的人数）
+class_dist = jwxt.query_grade_distribution(class_id=g.class_id)
+course_dist = jwxt.query_grade_distribution(course_code=g.course_code)
+
+# 3) 个人排名（默认查当前登录学生）
+class_rank = jwxt.query_grade_ranking(class_id=g.class_id)
+course_rank = jwxt.query_grade_ranking(course_code=g.course_code)
+# class_rank.rank / class_rank.total / class_rank.score
+```
+
 ### 学生评教
 
 `ysu_sdk.jwxt` 是 SDK 中**唯一的写操作场景**。提交评教不可撤回，请先用
@@ -119,8 +147,11 @@ jwxt.submit_evaluation(
 
 所有查询方法返回结构化数据类型（`@dataclass(frozen=True, slots=True)`）：
 
-- `Grade`：成绩信息（课程名、课程号、成绩、绩点、学分、学期等）
+- `Grade`：成绩信息（课程名、课程号、教学班ID、成绩、绩点、学分、学期等）
 - `GPAStats`：学分绩点统计（必修/选修/学位课学分、各类平均绩点等）
+- `GradeStatistics`：成绩统计（最高分 / 最低分 / 平均分；教学班或课程总体）
+- `GradeDistribution`：成绩分布（按等级分桶的人数；教学班或课程总体）
+- `GradeRanking`：学生成绩排名（教学班内或课程总体）
 - `Course`：课程信息（课程名、教师、教室、星期、节次、周次等）
 - `Exam`：考试安排（课程名、考试时间、地点、座位号等）
 - `StudentInfo`：学生基本信息（姓名、学号、院系、专业、班级等）
