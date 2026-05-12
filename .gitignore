@@ -27,6 +27,11 @@ venv/
 *.cas.json
 session.pkl
 
+# Env
+.env
+.env.*
+!.env.example
+
 # OS
 .DS_Store
 Thumbs.db
