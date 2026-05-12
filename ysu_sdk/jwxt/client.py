@@ -6,15 +6,16 @@
 from __future__ import annotations
 
 import datetime
+import functools
 import json
-import logging
-from typing import Any
+from typing import Any, Callable, TypeVar
 
 import requests
 
 from ysu_sdk.cas.client import CASClient
 from ysu_sdk.jwxt.constants import APP_IDS, API_PATHS, JWXT_APP_BASE, JWXT_BASE_URL
 from ysu_sdk.jwxt.exceptions import JWXTBusinessError, JWXTProtocolError, NotLoggedInError
+from ysu_sdk.jwxt.session import JWXTSession
 from ysu_sdk.jwxt.types import (
     AcademicCompletion,
     AcademicWarning,
@@ -37,8 +38,6 @@ from ysu_sdk.jwxt.types import (
     TermCalendar,
     TrainingPlan,
 )
-
-logger = logging.getLogger("ysu_sdk.jwxt")
 
 
 def _build_api_url(path: str) -> str:
@@ -152,6 +151,37 @@ def _build_grade_stats_request(
     return {"JXBID": "*", "KCH": str(course_code), "XNXQDM": term, "TJLX": "02"}
 
 
+_F = TypeVar("_F", bound=Callable[..., Any])
+
+
+def _with_lazy_reauth(fn: _F) -> _F:
+    """业务方法装饰器：默认信任现有 JWXT 会话，过期时回 CAS 拿一次新 ST。
+
+    流程：
+
+    1. 进入前 ``_ensure_authorized()``：session 上已有 jwxt 域 cookie 就跳过；
+       没有则走一次 ``cas.authorize``（cold start 路径）。
+    2. 执行业务方法。
+    3. 若抛 :class:`NotLoggedInError`（HTTP 401/403 或被重定向到 CAS 登录页），
+       调用 ``_reauthorize()`` 清掉过期 jwxt cookies 并重新 ``authorize``，
+       然后**整段重试**业务方法一次。
+
+    重试时业务方法体内自带的 ``_ensure_weu(app_id)`` 会被再次执行，自然恢复
+    ``_WEU``，无需装饰器关心当前 app id。重试只做一次：再失败就直接抛出。
+    """
+
+    @functools.wraps(fn)
+    def wrapper(self: "JWXTClient", *args: Any, **kwargs: Any) -> Any:
+        self._ensure_authorized()
+        try:
+            return fn(self, *args, **kwargs)
+        except NotLoggedInError:
+            self._reauthorize()
+            return fn(self, *args, **kwargs)
+
+    return wrapper  # type: ignore[return-value]
+
+
 class JWXTClient:
     """燕山大学教务系统信息查询客户端。
 
@@ -173,13 +203,16 @@ class JWXTClient:
         cas_client: CASClient,
         *,
         session: requests.Session | None = None,
+        jwxt_session: JWXTSession | None = None,
         timeout: float = 30,
     ) -> None:
         self.cas = cas_client
         self.timeout = timeout
         self.session = session if session is not None else requests.Session()
-        # 把 CAS 凭据同步到本 session，再authorize到教务系统
-        self._ensure_authorized()
+        if jwxt_session is not None:
+            jwxt_session.apply(self.session)
+        # 不在此处 ensure_authorized：改为业务方法装饰器在首次调用时按需执行，
+        # 避免无意义的 CAS 调用（特别是 ysu-api 等 stateless 调用方）。
 
     # ──────────────────────────────────────────────────────────────────── #
     # 内部辅助
@@ -197,6 +230,32 @@ class JWXTClient:
 
         service = f"{JWXT_BASE_URL}/jwapp/sys/emaphome/portal/index.do"
         self.cas.authorize(service, session=self.session)
+
+    def _reauthorize(self) -> None:
+        """显式作废当前 JWXT 会话，重新走 CAS 拿 ST。
+
+        被 :func:`_with_lazy_reauth` 装饰器在捕获 :class:`NotLoggedInError`
+        后调用：先清掉 ``jwxt.ysu.edu.cn`` 域上所有可能过期的 cookie，再让
+        ``cas.authorize`` 给我们重发一组新 ``JSESSIONID`` / ``_WEU``。
+
+        ``RequestsCookieJar.clear(domain=...)`` 在域不存在时会抛 ``KeyError``，
+        这对我们没有意义——目标就是"清空该域"，不存在就当作已清完。
+        """
+        for domain in ("jwxt.ysu.edu.cn", ".jwxt.ysu.edu.cn"):
+            try:
+                self.session.cookies.clear(domain=domain)
+            except KeyError:
+                pass
+        service = f"{JWXT_BASE_URL}/jwapp/sys/emaphome/portal/index.do"
+        self.cas.authorize(service, session=self.session)
+
+    def session_snapshot(self) -> JWXTSession:
+        """从当前 session 提取一份新鲜的 :class:`JWXTSession`。
+
+        供外部调用方（如 ysu-api 的响应阶段中间件）把可能旋转过的 jwxt cookie
+        持久化或回传给客户端。
+        """
+        return JWXTSession.from_session(self.session)
 
     def _ensure_weu(self, app_id: str) -> None:
         """访问应用首页以刷新 ``_WEU`` 权限 token。
@@ -253,6 +312,7 @@ class JWXTClient:
     # 成绩查询
     # ──────────────────────────────────────────────────────────────────── #
 
+    @_with_lazy_reauth
     def query_grades(
         self,
         *,
@@ -330,6 +390,7 @@ class JWXTClient:
         rows = _extract_rows(datas, "xscjcx")
         return [_parse_grade(r) for r in rows]
 
+    @_with_lazy_reauth
     def query_gpa_stats(
         self,
         *,
@@ -356,6 +417,7 @@ class JWXTClient:
             raise JWXTProtocolError("query_gpa_stats returned empty result")
         return _parse_gpa_stats(rows[0])
 
+    @_with_lazy_reauth
     def query_grade_statistics(
         self,
         *,
@@ -400,6 +462,7 @@ class JWXTClient:
             raise JWXTProtocolError("query_grade_statistics returned empty result")
         return _parse_grade_statistics(rows[0])
 
+    @_with_lazy_reauth
     def query_grade_distribution(
         self,
         *,
@@ -440,6 +503,7 @@ class JWXTClient:
         rows = _extract_rows(datas, "jxbcjfbcx")
         return [_parse_grade_distribution(r) for r in rows]
 
+    @_with_lazy_reauth
     def query_grade_ranking(
         self,
         *,
@@ -492,6 +556,7 @@ class JWXTClient:
     # 课表查询
     # ──────────────────────────────────────────────────────────────────── #
 
+    @_with_lazy_reauth
     def query_schedule(
         self,
         *,
@@ -514,6 +579,7 @@ class JWXTClient:
         rows = _extract_rows(datas, "cxxszhxqkb")
         return [_parse_course(r) for r in rows]
 
+    @_with_lazy_reauth
     def query_schedule_experimental(
         self,
         *,
@@ -544,6 +610,7 @@ class JWXTClient:
             course_category=course_category,
         )
 
+    @_with_lazy_reauth
     def query_unscheduled_courses(
         self,
         *,
@@ -604,6 +671,7 @@ class JWXTClient:
         rows = _extract_rows(datas, row_key)
         return [_parse_course(r) for r in rows]
 
+    @_with_lazy_reauth
     def query_class_periods(self) -> list[ClassPeriod]:
         """查询课表节次配置（每节课的起止时间）。
 
@@ -619,6 +687,7 @@ class JWXTClient:
         rows = _extract_rows(datas, "jc")
         return [_parse_class_period(r) for r in rows]
 
+    @_with_lazy_reauth
     def query_term_calendar(
         self,
         *,
@@ -644,6 +713,7 @@ class JWXTClient:
             raise JWXTProtocolError("query_term_calendar returned empty result")
         return _parse_term_calendar(rows[0])
 
+    @_with_lazy_reauth
     def query_current_week(
         self,
         *,
@@ -677,6 +747,7 @@ class JWXTClient:
     # 考试安排
     # ──────────────────────────────────────────────────────────────────── #
 
+    @_with_lazy_reauth
     def query_exams(
         self,
         *,
@@ -709,6 +780,7 @@ class JWXTClient:
     # 学生基本信息
     # ──────────────────────────────────────────────────────────────────── #
 
+    @_with_lazy_reauth
     def query_student_info(self) -> StudentInfo:
         """查询当前登录学生的基本信息。
 
@@ -732,6 +804,7 @@ class JWXTClient:
     # 培养方案
     # ──────────────────────────────────────────────────────────────────── #
 
+    @_with_lazy_reauth
     def query_training_plan(
         self,
         *,
@@ -774,6 +847,7 @@ class JWXTClient:
     # 学业完成查询
     # ──────────────────────────────────────────────────────────────────── #
 
+    @_with_lazy_reauth
     def query_academic_completion(self) -> AcademicCompletion:
         """查询学业完成情况。
 
@@ -792,6 +866,7 @@ class JWXTClient:
     # 学业预警
     # ──────────────────────────────────────────────────────────────────── #
 
+    @_with_lazy_reauth
     def query_academic_warnings(self) -> list[AcademicWarning]:
         """查询学业预警结果。
 
@@ -808,6 +883,7 @@ class JWXTClient:
     # 评教
     # ──────────────────────────────────────────────────────────────────── #
 
+    @_with_lazy_reauth
     def query_evaluation_types(
         self,
         *,
@@ -832,6 +908,7 @@ class JWXTClient:
         rows = _extract_rows(datas, "getPjlx")
         return [_parse_evaluation_type(r) for r in rows]
 
+    @_with_lazy_reauth
     def query_pending_evaluations(
         self,
         eval_type: str,
@@ -867,6 +944,7 @@ class JWXTClient:
         rows = _extract_rows(datas, "getDpwj")
         return [_parse_evaluation_task(r) for r in rows]
 
+    @_with_lazy_reauth
     def get_evaluation_detail(
         self,
         group_no: str,
@@ -896,6 +974,7 @@ class JWXTClient:
             raise JWXTProtocolError("get_evaluation_detail returned empty result")
         return _parse_evaluation_detail(raw)
 
+    @_with_lazy_reauth
     def calculate_evaluation_score(
         self,
         group_no: str,
@@ -940,6 +1019,7 @@ class JWXTClient:
             ),
         )
 
+    @_with_lazy_reauth
     def submit_evaluation(
         self,
         group_no: str,

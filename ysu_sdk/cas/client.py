@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import logging
 import re
 import time
 import urllib.parse
@@ -46,8 +45,6 @@ from ysu_sdk.cas.types import (
     MFAMethod,
     Step1Result,
 )
-
-logger = logging.getLogger("ysu_sdk.cas")
 
 
 _TICKET_RE = re.compile(r"ticket=(ST-[^&\s]+)")

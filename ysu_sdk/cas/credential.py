@@ -16,12 +16,13 @@ from __future__ import annotations
 import json
 import os
 import sys
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 import requests
-from requests.cookies import create_cookie
 
+from ysu_sdk._cookie import CookieEntry, collect_cookies, install_cookies
 from ysu_sdk.cas.constants import (
     CAS_COOKIE_DOMAIN,
     DEFAULT_CREDENTIAL_PATH,
@@ -39,23 +40,15 @@ def _is_cas_path(path: str) -> bool:
     return path == "/" or path.startswith(_ALLOWED_PATH_PREFIX)
 
 
-@dataclass(frozen=True, slots=True)
-class _CookieEntry:
-    """单条 cookie 的可序列化表示。"""
-
-    name: str
-    value: str
-    domain: str
-    path: str
-    secure: bool
-    expires: int | None  # epoch seconds，None 表示会话级
+def _is_cas_cookie(c: Any) -> bool:
+    return c.domain == CAS_COOKIE_DOMAIN and _is_cas_path(c.path or "")
 
 
 @dataclass(slots=True)
 class CASCredential:
     """CAS 网关凭据：一组 cer.ysu.edu.cn 域上的 cookie。"""
 
-    cookies: list[_CookieEntry]
+    cookies: list[CookieEntry]
 
     # ──────────────────────────────────────────────────────────────────── #
     # 与 requests.Session 的互转
@@ -67,39 +60,14 @@ class CASCredential:
 
         筛选规则：``domain == cer.ysu.edu.cn`` 且 path ∈ {``/``, ``/authserver/...``}。
         """
-        entries: list[_CookieEntry] = []
-        for c in session.cookies:
-            if c.domain != CAS_COOKIE_DOMAIN:
-                continue
-            if not _is_cas_path(c.path or ""):
-                continue
-            entries.append(
-                _CookieEntry(
-                    name=c.name,
-                    value=c.value or "",
-                    domain=c.domain,
-                    path=c.path or "/",
-                    secure=bool(c.secure),
-                    expires=int(c.expires) if c.expires is not None else None,
-                )
-            )
-        return cls(cookies=entries)
+        return cls(cookies=collect_cookies(session, _is_cas_cookie))
 
     def apply(self, session: requests.Session) -> None:
         """把凭据中的 cookie **逐条**写入 ``session``，保留 path/domain 等元数据。
 
         若 ``session`` 上已存在同 name/domain/path 的 cookie，会被覆盖。
         """
-        for entry in self.cookies:
-            cookie = create_cookie(
-                name=entry.name,
-                value=entry.value,
-                domain=entry.domain,
-                path=entry.path,
-                secure=entry.secure,
-                expires=entry.expires,
-            )
-            session.cookies.set_cookie(cookie)
+        install_cookies(session, self.cookies)
 
     # ──────────────────────────────────────────────────────────────────── #
     # JSON 序列化
@@ -107,7 +75,7 @@ class CASCredential:
 
     def to_json(self) -> str:
         return json.dumps(
-            {"cookies": [asdict(c) for c in self.cookies]},
+            {"cookies": [c.to_dict() for c in self.cookies]},
             ensure_ascii=False,
             indent=2,
         )
@@ -120,18 +88,18 @@ class CASCredential:
         raw_cookies = data["cookies"]
         if not isinstance(raw_cookies, list):
             raise ValueError("invalid CASCredential JSON: 'cookies' must be a list")
+        entries = [CookieEntry.from_dict(item) for item in raw_cookies]
+        # 历史数据里有些条目可能没 domain，回填到 CAS 网关域上
         entries = [
-            _CookieEntry(
-                name=str(item["name"]),
-                value=str(item.get("value", "")),
-                domain=str(item.get("domain", CAS_COOKIE_DOMAIN)),
-                path=str(item.get("path", "/")),
-                secure=bool(item.get("secure", False)),
-                expires=(
-                    int(item["expires"]) if item.get("expires") is not None else None
-                ),
+            e if e.domain else CookieEntry(
+                name=e.name,
+                value=e.value,
+                domain=CAS_COOKIE_DOMAIN,
+                path=e.path,
+                secure=e.secure,
+                expires=e.expires,
             )
-            for item in raw_cookies
+            for e in entries
         ]
         return cls(cookies=entries)
 

@@ -7,6 +7,7 @@ from ysu_sdk.jwxt.exceptions import (
     JWXTProtocolError,
     JWXTBusinessError,
 )
+from ysu_sdk.jwxt.session import JWXTSession
 from ysu_sdk.jwxt.types import (
     AcademicCompletion,
     AcademicWarning,
@@ -32,6 +33,7 @@ from ysu_sdk.jwxt.types import (
 
 __all__ = [
     "JWXTClient",
+    "JWXTSession",
     "JWXTError",
     "NotLoggedInError",
     "JWXTProtocolError",
