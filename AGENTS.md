@@ -1,6 +1,6 @@
-# CLAUDE.md
+# AGENTS.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides guidance to AI coding agents when working with code in this repository.
 
 ## Project
 
@@ -182,7 +182,7 @@ query_evaluation_types  →  query_pending_evaluations  →  get_evaluation_deta
 
 Related design point: `CASClient.is_authenticated()` raises `CASNetworkError` on transport failure (connection refused, timeout, WAF reset) instead of returning `False`, so a WAF-blocked/unreachable gateway is never confused with an expired TGC. Callers using it as a health signal should catch `CASNetworkError` separately.
 
-The same WAF also **tarpits**: after enough burst traffic from one IP, requests start succeeding only after ~30 s delays instead of being reset. It looks like a hang but is throttling; pace scripts accordingly.
+The same WAF also **tarpits progressively**: after enough burst traffic, requests from the flagged client fingerprint succeed only after quantized delays that escalate per offense (observed 30 s → 40 s → 50 s, capping at ~50 s). It looks like a hang but is throttling — and crucially, retrying feeds the escalation. Counterintuitively the delay pool is **fingerprint-selective, not IP-wide**: at the same moment from the same IP, Chrome (~150 ms) and curl/libcurl (~340 ms) pass at full speed while python-requests/urllib3 is delayed. Two lessons: (a) stop the flagged fingerprint's traffic immediately rather than retrying; (b) curl_cffi (libcurl, any impersonation) escapes the pool and can serve as a recovery transport for smoke tests. Whether the pool is armed globally for urllib3 or only after behavioral bursts is undetermined — treat paced, normal SDK use as safe by default.
 
 ## Conventions
 
