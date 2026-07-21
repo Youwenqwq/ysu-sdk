@@ -120,6 +120,13 @@ Module-level helpers reduce parsing duplication:
 
 In schedule rows (`cxxszhxqkb`, `querybjkb`) `SKZC` is a 0/1 **bitmap** (char N = week N); in `xswpkc` rows it's **text** (`"15-17周"`). Never parse it blindly: `_weeks_bitmap()` normalizes to bitmap-or-empty, and `_week_active(bitmap, week)` does the bounds-checked lookup. `Course.weeks_bitmap` is populated by the former; `UnscheduledCourse.weeks_text` keeps the latter. `query_courses_on_date(date)` chains `query_current_week` + `query_schedule` and filters on `week_day` + bitmap — no new endpoint involved.
 
+#### 补考办理（bkbl）— 只读
+
+只封装读面（批次 + 可报名/已报名课程），报名写操作有意不接。注意点：
+
+- 补考学期**不等于**当前学期：取系统参数 `cxxtcs.do`（`CSDM=KW&ZCSDM=BKBMXNXQ`）的 `CSZA`，`_get_makeup_term()` 是 `term=None` 时的默认来源。
+- `cxbkbmmx.do` 两个口径只差 `querySetting` 尾句：可报名 = `SFKBM=1 + KSBMZTDM notEqual 02`；已报名 = `KSBMZTDM m_value_equal 02`。
+
 #### 全校课表（kcbcx）— Referer-gated code tables
 
 - `/jwapp/code/*.do` dictionary endpoints validate the **`Referer` header**: missing → `code=404` *business envelope* (HTTP 200, not HTTP 404). Diagnosed by cookie-swap: the browser's own cookies replayed through `requests` still 404'd until `Referer` was added. `_emap_post`/`_post` take `referer=`; kcbcx methods pass `KCBCX_INDEX_URL`.
@@ -174,6 +181,8 @@ query_evaluation_types  →  query_pending_evaluations  →  get_evaluation_deta
 `cer` / `xgxt` / `ehall` / `res` subdomains sit behind a WAF that issues `nS_*` cookies (`jwxt` is notably NOT behind it). From off-campus IPs, bursts of non-browser traffic (python-requests/curl) get connections RST'd after the TLS handshake and escalate to a **full IP block** within minutes — the block then affects browsers too. When probing live endpoints: keep volume low, sequential, browser-paced; prefer capturing traffic from a real browser session.
 
 Related design point: `CASClient.is_authenticated()` raises `CASNetworkError` on transport failure (connection refused, timeout, WAF reset) instead of returning `False`, so a WAF-blocked/unreachable gateway is never confused with an expired TGC. Callers using it as a health signal should catch `CASNetworkError` separately.
+
+The same WAF also **tarpits**: after enough burst traffic from one IP, requests start succeeding only after ~30 s delays instead of being reset. It looks like a hang but is throttling; pace scripts accordingly.
 
 ## Conventions
 

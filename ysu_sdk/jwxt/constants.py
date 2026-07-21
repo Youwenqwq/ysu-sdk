@@ -16,6 +16,7 @@ APP_IDS = {
     "studentWdksapApp": "b5f84a8ed330481ca1efd1753d95a504",    # 我的考试安排（兼当前学年学期来源）
     "xyyj": "4855b7a54e50498580017c61a1dc94c8",                # 学业预警
     "kcbcx": "74506a67ea1c4bf3bb54eefa6e196779",               # 全校课表查询
+    "bkbl": "d4145d3276744d9da8bf609da4702ae8",                # 补考与结业生考试办理
     "pjapp": "5db54fd366204007af34267396897b24",               # 学生评教
 }
 
@@ -66,6 +67,11 @@ API_PATHS = {
     # —— 考试 ——
     "wdksap": "studentWdksapApp/WdksapController/cxxsksap.do",                   # 我的考试安排
     "wdksap_dqxnxq": "studentWdksapApp/modules/wdksap/dqxnxq.do",                # 当前学年学期代码（被多处复用作为默认 term）
+
+    # —— 补考办理（只读：批次与可报名课程；报名写操作不封装） ——
+    "bkxtcs": "bkbl/modules/bkbm/cxxtcs.do",                                     # 补考报名学年学期参数
+    "bkkspc": "bkbl/modules/bkbm/cxbkkspc.do",                                   # 补考考试批次
+    "bkbmmx": "bkbl/modules/bkbm/cxbkbmmx.do",                                   # 补考报名明细（可报名/已报名课程）
 
     # —— 学生评教 ——
     "pjlx": "pjapp/api/wdpj/getPjlx.do",                                         # 评教类型及待评数量

@@ -185,6 +185,66 @@ class ClassInfo:
 
 
 @dataclass(frozen=True, slots=True)
+class MakeupExamBatch:
+    """补考考试批次（对应 ``cxbkkspc``）。
+
+    Attributes:
+        name: 批次名称（``KSMC``，如 ``"2026-2027学年 秋季学期 开学补考"``）
+        batch_id: 批次代码（``KSDM``）
+        term: 学年学期（``XNXQDM``）
+        signup_start: 报名开始时间（``BMKSSJ``）
+        signup_end: 报名结束时间（``BMJSSJ``）
+        available_count: 可报名课程数（``KBMCOUNT``）
+        registered_count: 已报名课程数（``YBMCOUNT``）
+    """
+
+    name: str = ""
+    batch_id: str = ""
+    term: str = ""
+    signup_start: str = ""
+    signup_end: str = ""
+    available_count: int = 0
+    registered_count: int = 0
+    raw: dict[str, Any] = field(default_factory=dict, repr=False)
+
+
+@dataclass(frozen=True, slots=True)
+class MakeupExamCourse:
+    """补考报名明细课程（对应 ``cxbkbmmx``）。
+
+    Attributes:
+        name: 课程名称（``KCM``）
+        code: 课程号（``KCH``）
+        credit: 学分（``XF``）
+        hours: 学时（``XS``）
+        exam_seq: 考试序号（``KSXH``）
+        department: 开课单位（``KKDWDM_DISPLAY``）
+        status: 报名状态（``KSBMZTDM_DISPLAY``，如 ``"未报名"``）
+        is_available: 是否可报名（``SFKBM``）
+        signup_start: 报名开始时间（``BMKSSJ``）
+        signup_end: 报名结束时间（``BMJSSJ``）
+        batch_id: 批次代码（``KSDM``）
+        task_id: 考试任务 ID（``KSRWID``）
+        note: 备注（``BZ``）
+    """
+
+    name: str = ""
+    code: str = ""
+    credit: str = ""
+    hours: str = ""
+    exam_seq: str = ""
+    department: str = ""
+    status: str = ""
+    is_available: bool = False
+    signup_start: str = ""
+    signup_end: str = ""
+    batch_id: str = ""
+    task_id: str = ""
+    note: str = ""
+    raw: dict[str, Any] = field(default_factory=dict, repr=False)
+
+
+@dataclass(frozen=True, slots=True)
 class ClassroomInfo:
     """全校教室列表条目（对应 ``jscx``）。
 

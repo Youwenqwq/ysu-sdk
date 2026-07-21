@@ -265,6 +265,8 @@ def smoke_dump(cas: CASClient, term: str | None, output: Path, *, include_raw: b
     collect("jwxt", "adjusted_courses", lambda: jwxt.query_adjusted_courses(term=term))
     collect("jwxt", "overall_adjustments", lambda: jwxt.query_overall_adjustments(term=term))
     collect("jwxt", "courses_on_date", lambda: jwxt.query_courses_on_date(term=term))
+    collect("jwxt", "makeup_exam_batches", lambda: jwxt.query_makeup_exam_batches())
+    collect("jwxt", "makeup_exam_courses", lambda: jwxt.query_makeup_exam_courses())
     collect("jwxt", "grade_years", jwxt.query_grade_years)
     collect("jwxt", "departments", jwxt.query_departments)
     collect("jwxt", "majors", jwxt.query_majors)

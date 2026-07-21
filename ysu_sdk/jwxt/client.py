@@ -42,6 +42,8 @@ from ysu_sdk.jwxt.types import (
     GradeDistribution,
     GradeRanking,
     GradeStatistics,
+    MakeupExamBatch,
+    MakeupExamCourse,
     MajorInfo,
     OverallAdjustment,
     Question,
@@ -883,6 +885,92 @@ class JWXTClient:
         ]
 
     # ──────────────────────────────────────────────────────────────────── #
+    # 补考办理（只读）
+    # ──────────────────────────────────────────────────────────────────── #
+
+    def _get_makeup_term(self) -> str:
+        """查询补考报名的学年学期（系统参数 ``BKBMXNXQ``，与当前学期可能不同）。"""
+        self._ensure_weu(APP_IDS["bkbl"])
+        datas = self._post(API_PATHS["bkxtcs"], {"CSDM": "KW", "ZCSDM": "BKBMXNXQ"})
+        rows = _extract_rows(datas, "cxxtcs")
+        if not rows:
+            raise JWXTProtocolError("makeup term query returned empty result")
+        term = str(rows[0].get("CSZA") or "")
+        if not term:
+            raise JWXTProtocolError("makeup term query returned empty CSZA")
+        return term
+
+    @_with_lazy_reauth
+    def query_makeup_exam_batches(
+        self,
+        *,
+        term: str | None = None,
+    ) -> list[MakeupExamBatch]:
+        """查询补考考试批次（对应 ``cxbkkspc``）。
+
+        Args:
+            term: 学年学期；为 ``None`` 则使用系统参数配置的补考报名学期。
+
+        Returns:
+            批次列表（含报名起止时间与可报名/已报名课程数）。
+        """
+        if term is None:
+            term = self._get_makeup_term()
+        self._ensure_weu(APP_IDS["bkbl"])
+        datas = self._post(API_PATHS["bkkspc"], {"XNXQDM": term})
+        rows = _extract_rows(datas, "cxbkkspc")
+        return [_parse_makeup_batch(r) for r in rows]
+
+    @_with_lazy_reauth
+    def query_makeup_exam_courses(
+        self,
+        *,
+        term: str | None = None,
+        batch_id: str | None = None,
+        registered: bool = False,
+        page_size: int = 100,
+    ) -> list[MakeupExamCourse]:
+        """查询补考报名明细（对应 ``cxbkbmmx``）。
+
+        默认列出**可报名**课程（``SFKBM=1`` 且未报名）；``registered=True``
+        时列出已报名课程。
+
+        Args:
+            term: 学年学期；为 ``None`` 则使用系统参数配置的补考报名学期。
+            batch_id: 批次代码（``KSDM``）；为 ``None`` 则取当前批次的第一个。
+            registered: ``True`` 查已报名，``False`` 查可报名。
+            page_size: 每页条数。
+
+        Returns:
+            课程列表（含报名状态与报名起止时间）。
+        """
+        if term is None:
+            term = self._get_makeup_term()
+        if batch_id is None:
+            batches = self.query_makeup_exam_batches(term=term)
+            batch_id = batches[0].batch_id if batches else ""
+        self._ensure_weu(APP_IDS["bkbl"])
+
+        query: list[dict[str, str]] = [
+            {"name": "XNXQDM", "value": term, "builder": "equal", "linkOpt": "and"},
+        ]
+        if batch_id:
+            query.append({"name": "KSDM", "value": batch_id, "builder": "equal", "linkOpt": "and"})
+        if registered:
+            query.append({"name": "KSBMZTDM", "value": "02", "builder": "m_value_equal", "linkOpt": "and"})
+        else:
+            query.append({"name": "SFKBM", "value": "1", "builder": "equal", "linkOpt": "and"})
+            query.append({"name": "KSBMZTDM", "value": "02", "builder": "notEqual", "linkOpt": "and"})
+
+        datas = self._post(API_PATHS["bkbmmx"], {
+            "querySetting": json.dumps(query, ensure_ascii=False),
+            "pageSize": str(page_size),
+            "pageNumber": "1",
+        })
+        rows = _extract_rows(datas, "cxbkbmmx")
+        return [_parse_makeup_course(r) for r in rows]
+
+    # ──────────────────────────────────────────────────────────────────── #
     # 全校课表（kcbcx）
     # ──────────────────────────────────────────────────────────────────── #
 
@@ -1721,8 +1809,39 @@ def _parse_class_info(raw: dict[str, Any]) -> ClassInfo:
     )
 
 
-def _parse_classroom_info(raw: dict[str, Any]) -> ClassroomInfo:
-    return ClassroomInfo(
+def _parse_makeup_batch(raw: dict[str, Any]) -> MakeupExamBatch:
+    return MakeupExamBatch(
+        name=str(raw.get("KSMC") or ""),
+        batch_id=str(raw.get("KSDM") or ""),
+        term=str(raw.get("XNXQDM") or ""),
+        signup_start=str(raw.get("BMKSSJ") or ""),
+        signup_end=str(raw.get("BMJSSJ") or ""),
+        available_count=int(raw.get("KBMCOUNT") or 0),
+        registered_count=int(raw.get("YBMCOUNT") or 0),
+        raw=raw,
+    )
+
+
+def _parse_makeup_course(raw: dict[str, Any]) -> MakeupExamCourse:
+    return MakeupExamCourse(
+        name=str(raw.get("KCM") or ""),
+        code=str(raw.get("KCH") or ""),
+        credit=str(raw.get("XF") or ""),
+        hours=str(raw.get("XS") or ""),
+        exam_seq=str(raw.get("KSXH") or ""),
+        department=str(raw.get("KKDWDM_DISPLAY") or ""),
+        status=str(raw.get("KSBMZTDM_DISPLAY") or ""),
+        is_available=_to_bool(raw.get("SFKBM")),
+        signup_start=str(raw.get("BMKSSJ") or ""),
+        signup_end=str(raw.get("BMJSSJ") or ""),
+        batch_id=str(raw.get("KSDM") or ""),
+        task_id=str(raw.get("KSRWID") or ""),
+        note=str(raw.get("BZ") or ""),
+        raw=raw,
+    )
+
+
+def _parse_classroom_info(raw: dict[str, Any]) -> ClassroomInfo:    return ClassroomInfo(
         name=str(raw.get("JASMC") or ""),
         code=str(raw.get("JASDM") or ""),
         campus=str(raw.get("XXXQDM") or ""),
