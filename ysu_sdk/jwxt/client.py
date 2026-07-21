@@ -8,6 +8,7 @@ from __future__ import annotations
 import datetime
 import functools
 import json
+import re
 from typing import Any, Callable, TypeVar
 
 import requests
@@ -142,6 +143,49 @@ def _to_bool(val: Any) -> bool:
     ``None``、空串、其它任何字符串都视为 ``False``。
     """
     return str(val) in _TRUTHY_TOKENS
+
+
+# —— 日期/时间格式归一（学校接口至少有四种日期写法） ——
+
+_ISO_DATE_RE = re.compile(r"^(\d{4})[-./](\d{1,2})[-./](\d{1,2})$")
+_ISO_DATETIME_RE = re.compile(
+    r"^(\d{4})[-./](\d{1,2})[-./](\d{1,2})[T ](\d{1,2}):(\d{2}):(\d{2})$"
+)
+
+
+def _to_iso_date(val: Any) -> str:
+    """把已知日期格式归一为 ``YYYY-MM-DD``；未识别的原样透传。"""
+    s = str(val or "").strip()
+    m = _ISO_DATE_RE.match(s)
+    if m:
+        y, mo, d = m.groups()
+        return f"{y}-{int(mo):02d}-{int(d):02d}"
+    return str(val or "")
+
+
+def _to_iso_datetime(val: Any) -> str:
+    """把已知日期时间格式归一为 RFC3339（``YYYY-MM-DDTHH:MM:SS``）。
+
+    覆盖观测到的三种上游写法（``YYYY-MM-DD HH:MM:SS``、
+    ``YYYY.MM.DD HH:MM:SS``、``YYYY-MM-DDTHH:MM:SS``）；未识别的原样
+    透传——字符串契约下「偶尔不统一」不等于数据丢失。
+    """
+    s = str(val or "").strip()
+    m = _ISO_DATETIME_RE.match(s)
+    if m:
+        y, mo, d, h, mi, se = m.groups()
+        return f"{y}-{int(mo):02d}-{int(d):02d}T{int(h):02d}:{mi}:{se}"
+    return str(val or "")
+
+
+_EXAM_TIME_RANGE_RE = re.compile(r"(\d{1,2}:\d{2})\s*[-–~]\s*(\d{1,2}:\d{2})")
+
+
+def _exam_time_range(val: Any) -> tuple[str, str]:
+    """从 ``"2026-06-29 13:30-15:05(星期一)"`` 这类考试时间段描述中
+    提取 ``(开始, 结束)`` 的 ``HH:MM`` 对；匹配失败返回 ``("", "")``。"""
+    m = _EXAM_TIME_RANGE_RE.search(str(val or ""))
+    return (m.group(1), m.group(2)) if m else ("", "")
 
 
 # 实验/未排课接口共享的 KBLB 取值映射。
@@ -1635,7 +1679,7 @@ def _parse_grade(raw: dict[str, Any]) -> Grade:
         midterm_score=str(raw.get("QZCJ") if raw.get("QZCJ") is not None else ""),
         final_score=str(raw.get("QMCJ") if raw.get("QMCJ") is not None else ""),
         practice_score=str(raw.get("SJCJ") if raw.get("SJCJ") is not None else ""),
-        exam_time=str(raw.get("KSSJ") or ""),
+        exam_time=_to_iso_date(raw.get("KSSJ")),
         raw=raw,
     )
 
@@ -1814,8 +1858,8 @@ def _parse_makeup_batch(raw: dict[str, Any]) -> MakeupExamBatch:
         name=str(raw.get("KSMC") or ""),
         batch_id=str(raw.get("KSDM") or ""),
         term=str(raw.get("XNXQDM") or ""),
-        signup_start=str(raw.get("BMKSSJ") or ""),
-        signup_end=str(raw.get("BMJSSJ") or ""),
+        signup_start=_to_iso_datetime(raw.get("BMKSSJ")),
+        signup_end=_to_iso_datetime(raw.get("BMJSSJ")),
         available_count=int(raw.get("KBMCOUNT") or 0),
         registered_count=int(raw.get("YBMCOUNT") or 0),
         raw=raw,
@@ -1832,8 +1876,8 @@ def _parse_makeup_course(raw: dict[str, Any]) -> MakeupExamCourse:
         department=str(raw.get("KKDWDM_DISPLAY") or ""),
         status=str(raw.get("KSBMZTDM_DISPLAY") or ""),
         is_available=_to_bool(raw.get("SFKBM")),
-        signup_start=str(raw.get("BMKSSJ") or ""),
-        signup_end=str(raw.get("BMJSSJ") or ""),
+        signup_start=_to_iso_datetime(raw.get("BMKSSJ")),
+        signup_end=_to_iso_datetime(raw.get("BMJSSJ")),
         batch_id=str(raw.get("KSDM") or ""),
         task_id=str(raw.get("KSRWID") or ""),
         note=str(raw.get("BZ") or ""),
@@ -1879,7 +1923,7 @@ def _parse_term_calendar(raw: dict[str, Any]) -> TermCalendar:
     start = str(raw.get("XQKSRQ") or "")
     return TermCalendar(
         term=_combine_term(raw),
-        start_date=start.split()[0] if start else "",
+        start_date=_to_iso_date(start.split()[0]) if start else "",
         total_weeks=int(raw.get("ZZC") or 0),
         teaching_weeks=int(raw.get("ZJXZC") or 0),
         is_in_use=_to_bool(raw.get("SFSY")),
@@ -1893,22 +1937,26 @@ def _parse_current_week(raw: dict[str, Any]) -> CurrentWeek:
         week=int(raw.get("ZC") or 0),
         weekday=int(raw.get("XQJ") or 0),
         term=_combine_term(raw),
-        date=rq.split()[0] if rq else "",
+        date=_to_iso_date(rq.split()[0]) if rq else "",
         raw=raw,
     )
 
 
 def _parse_exam(raw: dict[str, Any]) -> Exam:
+    exam_time = str(raw.get("KSSJMS") or raw.get("KSSJ") or "")
+    start_time, end_time = _exam_time_range(exam_time)
     return Exam(
         name=str(raw.get("KCM") or ""),
         exam_name=str(raw.get("KSMC") or ""),
-        exam_date=str(raw.get("KSRQ") or ""),
-        exam_time=str(raw.get("KSSJMS") or raw.get("KSSJ") or ""),
+        exam_date=_to_iso_date(raw.get("KSRQ")),
+        exam_time=exam_time,
         exam_location=str(raw.get("JASMC") or ""),
         seat_number=str(raw.get("ZWH") or ""),
         course_code=str(raw.get("KCH") or ""),
         invigilator=str(raw.get("ZJJSXM") or ""),
         term=str(raw.get("XNXQDM") or ""),
+        exam_start_time=start_time,
+        exam_end_time=end_time,
         raw=raw,
     )
 
@@ -1968,8 +2016,8 @@ def _parse_academic_warning(raw: dict[str, Any]) -> AcademicWarning:
         warning_level=str(raw.get("YJJB") or ""),
         description=str(raw.get("BZ") or ""),
         term=str(raw.get("SCPCMC") or ""),
-        start_date=str(raw.get("YJKSSJ") or ""),
-        end_date=str(raw.get("YJJSSJ") or ""),
+        start_date=_to_iso_date(raw.get("YJKSSJ")),
+        end_date=_to_iso_date(raw.get("YJJSSJ")),
         raw=raw,
     )
 
@@ -1997,8 +2045,8 @@ def _parse_evaluation_task(raw: dict[str, Any]) -> EvaluationTask:
         eval_type_name=str(raw.get("PJLXMC") or ""),
         category=str(raw.get("PJLBDM") or ""),
         category_name=str(raw.get("PJLBMC") or ""),
-        start_time=str(raw.get("KSSJ") or ""),
-        end_time=str(raw.get("JSSJ") or ""),
+        start_time=_to_iso_datetime(raw.get("KSSJ")),
+        end_time=_to_iso_datetime(raw.get("JSSJ")),
         sequence=int(raw.get("XUH") or 1),
         class_name=str(raw.get("BJMC") or ""),
         group_no=str(raw.get("GROUPNO") or ""),

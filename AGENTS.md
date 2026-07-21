@@ -187,6 +187,7 @@ The same WAF also **tarpits progressively**: after enough burst traffic, request
 ## Conventions
 
 - Docstrings and user-facing strings (exceptions, README) are in Simplified Chinese; identifiers and code comments default to English.
+- **日期/时间字段约定**：日期统一 `YYYY-MM-DD`，日期时间统一 RFC3339（`YYYY-MM-DDTHH:MM:SS`）。归一由 `_to_iso_date` / `_to_iso_datetime` 在解析层完成——只改写已知格式（空格分隔、点号分隔等），未识别格式**原样透传**（字符串契约下不完美不等于数据丢失）。展示型时间串（如 `Exam.exam_time` 的 `"2026-06-29 13:30-15:05(星期一)"`）不改写原字段，需要结构化时加解析伴随字段（`exam_start_time` / `exam_end_time`）。
 - `from __future__ import annotations` everywhere. Dataclasses use `slots=True`; immutable ones use `frozen=True`.
 - Module-private modules are prefixed with `_` (`_crypto.py`, `_parser.py`) and not re-exported from `__init__.py`.
 - Exception hierarchy lives in `exceptions.py`; everything inherits from `CASError` (for `cas/`) or `JWXTError` (for `jwxt/`). Add new exception types there rather than raising `Exception` / `ValueError`.

@@ -355,6 +355,8 @@ class Exam:
         course_code: 课程号（``KCH``）
         invigilator: 主考/监考教师姓名（``ZJJSXM``）
         term: 学年学期代码（``XNXQDM``）
+        exam_start_time: 考试开始时间（``HH:MM``，从 ``exam_time`` 描述中解析；失败为空串）
+        exam_end_time: 考试结束时间（``HH:MM``，同上）
     """
 
     name: str
@@ -366,6 +368,8 @@ class Exam:
     course_code: str = ""
     invigilator: str = ""
     term: str = ""
+    exam_start_time: str = ""
+    exam_end_time: str = ""
     raw: dict[str, Any] = field(default_factory=dict, repr=False)
 
 
