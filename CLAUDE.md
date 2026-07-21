@@ -120,6 +120,13 @@ Module-level helpers reduce parsing duplication:
 
 In schedule rows (`cxxszhxqkb`, `querybjkb`) `SKZC` is a 0/1 **bitmap** (char N = week N); in `xswpkc` rows it's **text** (`"15-17周"`). Never parse it blindly: `_weeks_bitmap()` normalizes to bitmap-or-empty, and `_week_active(bitmap, week)` does the bounds-checked lookup. `Course.weeks_bitmap` is populated by the former; `UnscheduledCourse.weeks_text` keeps the latter. `query_courses_on_date(date)` chains `query_current_week` + `query_schedule` and filters on `week_day` + bitmap — no new endpoint involved.
 
+#### 全校课表（kcbcx）— Referer-gated code tables
+
+- `/jwapp/code/*.do` dictionary endpoints validate the **`Referer` header**: missing → `code=404` *business envelope* (HTTP 200, not HTTP 404). Diagnosed by cookie-swap: the browser's own cookies replayed through `requests` still 404'd until `Referer` was added. `_emap_post`/`_post` take `referer=`; kcbcx methods pass `KCBCX_INDEX_URL`.
+- Code tables return the standard `code` envelope. 专业 cascade is **client-side** (`otherFields.YXDM`); 班级 discovery is `bjcx.do` with server-side filters (`NJ/YXDM/ZYDM/SFYPK` as direct form params).
+- `querybjkb` / `querybjkbtk` / `querybjkbwpk` are `requestParamStr` style and share `_query_bjkb`.
+- `API_PATHS` entries starting with `/` are site-absolute and bypass `JWXT_APP_BASE` in `_build_api_url`.
+
 #### Grade statistics/distribution/ranking — `JXBID` vs `KCH` dispatch
 
 `query_grade_statistics` (`jxbcjtjcx`), `query_grade_distribution` (`jxbcjfbcx`), and `query_grade_ranking` (`jxbxspmcx`) are three sibling APIs that all live behind the `cjcx` `_WEU` and share the same dispatch shape: the caller picks **either** `class_id` (teaching-class scope, `TJLX=01`) or `course_code` (whole-course scope, `TJLX=02`), and the body is `JXBID/KCH/XNXQDM/TJLX`. The mutex is enforced in `_build_grade_stats_request` — providing both or neither raises `ValueError`. The two scopes are surfaced to callers as `scope="class"` / `scope="course"` on the returned dataclass via `_TJLX_TO_SCOPE`. For `TJLX=02`, the server expects `JXBID="*"` (a sentinel, not a wildcard pattern); the helper substitutes that automatically — don't ask callers to pass `"*"` themselves. `query_grade_ranking` additionally takes `student_id` (defaults to the logged-in user) and adds `XH` to the body; the other two don't.

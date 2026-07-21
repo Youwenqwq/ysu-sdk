@@ -123,6 +123,68 @@ class OverallAdjustment:
 
 
 @dataclass(frozen=True, slots=True)
+class CodeItem:
+    """代码表条目（年级、院系等字典数据）。
+
+    Attributes:
+        id: 代码值（如 ``"2025"`` / ``"301"``）
+        name: 显示名称（如 ``"2025级"`` / ``"机械工程学院"``）
+    """
+
+    id: str = ""
+    name: str = ""
+    raw: dict[str, Any] = field(default_factory=dict, repr=False)
+
+
+@dataclass(frozen=True, slots=True)
+class MajorInfo:
+    """专业代码表条目。
+
+    Attributes:
+        id: 专业代码（``ZYDM``）
+        name: 专业名称
+        department: 所属院系代码（``otherFields.YXDM``）
+    """
+
+    id: str = ""
+    name: str = ""
+    department: str = ""
+    raw: dict[str, Any] = field(default_factory=dict, repr=False)
+
+
+@dataclass(frozen=True, slots=True)
+class ClassInfo:
+    """全校班级列表条目（对应 ``bjcx``）。
+
+    Attributes:
+        class_id: 班级代码（``BJDM``，如 ``"01AA25001"``）
+        class_name: 班级名称（``BJMC``，如 ``"机械类25-1"``）
+        grade: 年级代码（``NJ``）
+        grade_display: 年级显示文本（如 ``"2025级"``）
+        department: 院系代码（``YXDM``）
+        department_display: 院系名称
+        major: 专业代码（``ZYDM``）
+        major_display: 专业名称
+        is_scheduled: 是否已排课（``SFYPK``）
+        student_count: 实际人数（``SJRS``）
+        initial_count: 初始人数（``CSRS``）
+    """
+
+    class_id: str = ""
+    class_name: str = ""
+    grade: str = ""
+    grade_display: str = ""
+    department: str = ""
+    department_display: str = ""
+    major: str = ""
+    major_display: str = ""
+    is_scheduled: bool = False
+    student_count: int = 0
+    initial_count: int = 0
+    raw: dict[str, Any] = field(default_factory=dict, repr=False)
+
+
+@dataclass(frozen=True, slots=True)
 class ClassPeriod:
     """课表节次配置。
 

@@ -11,8 +11,9 @@ gateway (`cer.ysu.edu.cn`) and educational administration system
 - `ysu_sdk.cas` — login, MFA, credential persistence, and cross-service
   Service-Ticket issuance on the CAS gateway.
 - `ysu_sdk.jwxt` — read-only queries (grades, schedule, exams, student info,
-  training plan, academic completion, warnings) and student evaluation
-  (write-once) against the educational administration system.
+  training plan, academic completion, warnings, campus-wide class schedules)
+  and student evaluation (write-once) against the educational administration
+  system.
 - `ysu_sdk.xgxt` — read-only queries against the 综合测评 (comprehensive
   evaluation) app of the student-affairs system (`xgxt.ysu.edu.cn`): scores,
   class/grade rankings, indicator details, radar comparison, academic report.

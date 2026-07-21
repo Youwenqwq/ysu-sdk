@@ -15,9 +15,12 @@ APP_IDS = {
     "xywccx": "2d855fd0484047518ac8087912ca71e0",              # 学业完成查询
     "studentWdksapApp": "b5f84a8ed330481ca1efd1753d95a504",    # 我的考试安排（兼当前学年学期来源）
     "xyyj": "4855b7a54e50498580017c61a1dc94c8",                # 学业预警
-    "kcbcx": "74506a67ea1c4bf3bb54eefa6e196779",               # 全校课表查询（未使用）
+    "kcbcx": "74506a67ea1c4bf3bb54eefa6e196779",               # 全校课表查询
     "pjapp": "5db54fd366204007af34267396897b24",               # 学生评教
 }
+
+# 全校课表应用首页（代码表端点的 Referer 校验值）
+KCBCX_INDEX_URL: str = f"{JWXT_APP_BASE}/kcbcx/*default/index.do"
 
 # API 路径模板（相对 JWXT_APP_BASE，最终 URL 由 _build_api_url 拼出）
 API_PATHS = {
@@ -38,7 +41,15 @@ API_PATHS = {
     "jc": "wdkb/modules/jshkcb/jc.do",                                           # 节次配置（每节课的起止时间）
     "dqzc": "wdkb/modules/jshkcb/dqzc.do",                                       # 指定日期对应的教学周次与星期
     "cxxljc": "wdkb/modules/xskcb/cxxljc.do",                                    # 学期校历配置（起始日期、总周次、教学周次等）
-    "kcbcx": "kcbcx/KbcxController/querybjkb.do",                                # 全校班级课表查询（未使用）
+    "kcbcx": "kcbcx/KbcxController/querybjkb.do",                                # 全校班级课表（requestParamStr 风格）
+    "kcbcx_tk": "kcbcx/KbcxController/querybjkbtk.do",                           # 班级课表调课记录
+    "kcbcx_wpk": "kcbcx/KbcxController/querybjkbwpk.do",                          # 班级课表未排课
+    "bjcx": "kcbcx/modules/bjkcb/bjcx.do",                                        # 班级列表（级联筛选：年级/院系/专业）
+
+    # —— 代码表（级联筛选的字典数据源；绝对路径，不随 JWXT_APP_BASE 拼接） ——
+    "code_nj": "/jwapp/code/c1e19f4d-94e0-464f-bb7b-d70d0517150c.do",            # 年级
+    "code_yxdm": "/jwapp/code/49a86828-aef9-4a48-b26f-01149dac72d7.do",          # 院系
+    "code_zydm": "/jwapp/code/87a9226a-6e44-44cc-9743-c081a8f9cb9b.do",          # 专业（otherFields.YXDM 为父级院系）
 
     # —— 学籍 / 培养方案 / 学业 ——
     "xsjbxx": "xsjbxxgl/modules/xsjbxx/cxxsjbxxlb.do",                           # 学生基本信息

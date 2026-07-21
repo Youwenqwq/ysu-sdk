@@ -13,13 +13,21 @@ from typing import Any, Callable, TypeVar
 import requests
 
 from ysu_sdk.cas.client import CASClient
-from ysu_sdk.jwxt.constants import APP_IDS, API_PATHS, JWXT_APP_BASE, JWXT_BASE_URL
+from ysu_sdk.jwxt.constants import (
+    APP_IDS,
+    API_PATHS,
+    JWXT_APP_BASE,
+    JWXT_BASE_URL,
+    KCBCX_INDEX_URL,
+)
 from ysu_sdk.jwxt.exceptions import JWXTBusinessError, JWXTProtocolError, NotLoggedInError
 from ysu_sdk.jwxt.session import JWXTSession
 from ysu_sdk.jwxt.types import (
     AcademicCompletion,
     AcademicWarning,
+    ClassInfo,
     ClassPeriod,
+    CodeItem,
     Course,
     CourseAdjustment,
     CurrentWeek,
@@ -33,6 +41,7 @@ from ysu_sdk.jwxt.types import (
     GradeDistribution,
     GradeRanking,
     GradeStatistics,
+    MajorInfo,
     OverallAdjustment,
     Question,
     QuestionOption,
@@ -44,7 +53,9 @@ from ysu_sdk.jwxt.types import (
 
 
 def _build_api_url(path: str) -> str:
-    """拼接完整 API URL。"""
+    """拼接完整 API URL。以 ``/`` 开头的路径视为站内绝对路径（如代码表）。"""
+    if path.startswith("/"):
+        return f"{JWXT_BASE_URL}{path}"
     return f"{JWXT_APP_BASE}/{path}"
 
 
@@ -54,6 +65,7 @@ def _emap_post(
     data: dict[str, str] | None = None,
     *,
     timeout: float = 30,
+    referer: str | None = None,
 ) -> dict[str, Any]:
     """发送 EMAP 风格的 POST 请求并解析响应。
 
@@ -74,14 +86,19 @@ def _emap_post(
     if data is None:
         data = {}
 
+    headers = {
+        "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+        "X-Requested-With": "XMLHttpRequest",
+        "Accept": "application/json, text/javascript, */*; q=0.01",
+    }
+    if referer is not None:
+        # 代码表等部分端点校验 Referer（缺失时返回 code=404 信封）
+        headers["Referer"] = referer
+
     resp = session.post(
         url,
         data=data,
-        headers={
-            "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
-            "X-Requested-With": "XMLHttpRequest",
-            "Accept": "application/json, text/javascript, */*; q=0.01",
-        },
+        headers=headers,
         timeout=timeout,
     )
     resp.raise_for_status()
@@ -287,11 +304,13 @@ class JWXTClient:
         self,
         path: str,
         data: dict[str, str] | None = None,
+        *,
+        referer: str | None = None,
     ) -> dict[str, Any]:
         """``_emap_post`` 的快捷封装，自动拼接 URL 并处理异常。"""
         url = _build_api_url(path)
         try:
-            return _emap_post(self.session, url, data, timeout=self.timeout)
+            return _emap_post(self.session, url, data, timeout=self.timeout, referer=referer)
         except requests.HTTPError as exc:
             if exc.response is not None and exc.response.status_code in (401, 403):
                 raise NotLoggedInError(f"HTTP {exc.response.status_code} from {url}") from exc
@@ -863,6 +882,179 @@ class JWXTClient:
         ]
 
     # ──────────────────────────────────────────────────────────────────── #
+    # 全校课表（kcbcx）
+    # ──────────────────────────────────────────────────────────────────── #
+
+    @_with_lazy_reauth
+    def query_grade_years(self) -> list[CodeItem]:
+        """查询年级代码表（全校课表筛选的字典数据）。"""
+        self._ensure_weu(APP_IDS["kcbcx"])
+        datas = self._post(API_PATHS["code_nj"], referer=KCBCX_INDEX_URL)
+        return [_parse_code_item(r) for r in _extract_rows(datas, "code")]
+
+    @_with_lazy_reauth
+    def query_departments(self) -> list[CodeItem]:
+        """查询院系代码表。"""
+        self._ensure_weu(APP_IDS["kcbcx"])
+        datas = self._post(API_PATHS["code_yxdm"], referer=KCBCX_INDEX_URL)
+        return [_parse_code_item(r) for r in _extract_rows(datas, "code")]
+
+    @_with_lazy_reauth
+    def query_majors(self, department: str | None = None) -> list[MajorInfo]:
+        """查询专业代码表。
+
+        专业代码表为全量列表（服务端不过滤），院系级联在客户端完成。
+
+        Args:
+            department: 院系代码（``YXDM``）；为 ``None`` 则返回全部专业。
+        """
+        self._ensure_weu(APP_IDS["kcbcx"])
+        datas = self._post(API_PATHS["code_zydm"], referer=KCBCX_INDEX_URL)
+        majors = [_parse_major(r) for r in _extract_rows(datas, "code")]
+        if department is not None:
+            majors = [m for m in majors if m.department == str(department)]
+        return majors
+
+    @_with_lazy_reauth
+    def query_class_list(
+        self,
+        *,
+        term: str | None = None,
+        grade: str | None = None,
+        department: str | None = None,
+        major: str | None = None,
+        scheduled: bool | None = None,
+        page_size: int = 1000,
+    ) -> list[ClassInfo]:
+        """查询全校班级列表（对应 ``bjcx``）。
+
+        Args:
+            term: 学年学期；为 ``None`` 则查询当前学期。
+            grade: 年级代码（``NJ``，如 ``"2025"``），见 :meth:`query_grade_years`。
+            department: 院系代码（``YXDM``），见 :meth:`query_departments`。
+            major: 专业代码（``ZYDM``），见 :meth:`query_majors`。
+            scheduled: 是否已排课；为 ``None`` 则不过滤。
+            page_size: 每页条数（默认 1000，覆盖全校约 900 个班级）。
+
+        Returns:
+            班级列表（含年级/院系/专业代码，可用于 :meth:`query_class_schedule`）。
+        """
+        if term is None:
+            term = self._get_current_term(APP_IDS["studentWdksapApp"], "wdksap_dqxnxq")
+        self._ensure_weu(APP_IDS["kcbcx"])
+
+        form = {
+            "XNXQDM": term,
+            "SFSY": "1",
+            "*order": "-NJ,+YXPX,+ZYPX,+PX",
+            "pageSize": str(page_size),
+            "pageNumber": "1",
+        }
+        if grade is not None:
+            form["NJ"] = str(grade)
+        if department is not None:
+            form["YXDM"] = str(department)
+        if major is not None:
+            form["ZYDM"] = str(major)
+        if scheduled is not None:
+            form["SFYPK"] = "1" if scheduled else "0"
+        datas = self._post(API_PATHS["bjcx"], form, referer=KCBCX_INDEX_URL)
+        return [_parse_class_info(r) for r in _extract_rows(datas, "bjcx")]
+
+    def _query_bjkb(
+        self,
+        *,
+        path_key: str,
+        row_key: str,
+        class_id: str,
+        term: str | None,
+        week: int | None,
+        parser: Callable[[dict[str, Any]], Any],
+    ) -> list[Any]:
+        """班级课表系列接口的共用实现（``querybjkb`` / ``querybjkbtk`` / ``querybjkbwpk``）。
+
+        三者均为 ``requestParamStr`` 风格，请求体 ``XNXQDM/BJDM(/SKZC)``。
+        """
+        if term is None:
+            term = self._get_current_term(APP_IDS["studentWdksapApp"], "wdksap_dqxnxq")
+        self._ensure_weu(APP_IDS["kcbcx"])
+
+        payload: dict[str, Any] = {"XNXQDM": term, "BJDM": class_id}
+        if week is not None:
+            payload["SKZC"] = week
+        datas = self._post(
+            API_PATHS[path_key],
+            {"requestParamStr": json.dumps(payload, separators=(",", ":"))},
+            referer=KCBCX_INDEX_URL,
+        )
+        return [parser(r) for r in _extract_rows(datas, row_key)]
+
+    @_with_lazy_reauth
+    def query_class_schedule(
+        self,
+        class_id: str,
+        *,
+        term: str | None = None,
+    ) -> list[Course]:
+        """查询指定行政班的课表（对应 ``querybjkb``）。
+
+        Args:
+            class_id: 班级代码（``BJDM``），见 :meth:`query_class_list`。
+            term: 学年学期；为 ``None`` 则查询当前学期。
+
+        Returns:
+            该班的课程列表（与个人课表同构）。
+        """
+        return self._query_bjkb(
+            path_key="kcbcx",
+            row_key="querybjkb",
+            class_id=class_id,
+            term=term,
+            week=None,
+            parser=_parse_course,
+        )
+
+    @_with_lazy_reauth
+    def query_class_adjusted_courses(
+        self,
+        class_id: str,
+        *,
+        term: str | None = None,
+        week: int | None = None,
+    ) -> list[CourseAdjustment]:
+        """查询指定行政班的调课记录（对应 ``querybjkbtk``）。
+
+        当前学期服务端无数据，字段映射参照 ``Tkjg`` 模型盲写，
+        原始字段可从 ``raw`` 获取。
+        """
+        return self._query_bjkb(
+            path_key="kcbcx_tk",
+            row_key="querybjkbtk",
+            class_id=class_id,
+            term=term,
+            week=week,
+            parser=_parse_course_adjustment,
+        )
+
+    @_with_lazy_reauth
+    def query_class_unscheduled_courses(
+        self,
+        class_id: str,
+        *,
+        term: str | None = None,
+        week: int | None = None,
+    ) -> list[UnscheduledCourse]:
+        """查询指定行政班的未排课程（对应 ``querybjkbwpk``）。"""
+        return self._query_bjkb(
+            path_key="kcbcx_wpk",
+            row_key="querybjkbwpk",
+            class_id=class_id,
+            term=term,
+            week=week,
+            parser=_parse_unscheduled_course,
+        )
+
+    # ──────────────────────────────────────────────────────────────────── #
     # 考试安排
     # ──────────────────────────────────────────────────────────────────── #
 
@@ -1357,6 +1549,41 @@ def _parse_overall_adjustment(raw: dict[str, Any]) -> OverallAdjustment:
         batch_name=str(raw.get("PCMC") or ""),
         adjustment_type=str(raw.get("TKLXDM") or ""),
         time_range=str(raw.get("TKSJDDM") or ""),
+        raw=raw,
+    )
+
+
+def _parse_code_item(raw: dict[str, Any]) -> CodeItem:
+    return CodeItem(
+        id=str(raw.get("id") or ""),
+        name=str(raw.get("name") or ""),
+        raw=raw,
+    )
+
+
+def _parse_major(raw: dict[str, Any]) -> MajorInfo:
+    other = raw.get("otherFields")
+    return MajorInfo(
+        id=str(raw.get("id") or ""),
+        name=str(raw.get("name") or ""),
+        department=str(other.get("YXDM") or "") if isinstance(other, dict) else "",
+        raw=raw,
+    )
+
+
+def _parse_class_info(raw: dict[str, Any]) -> ClassInfo:
+    return ClassInfo(
+        class_id=str(raw.get("BJDM") or ""),
+        class_name=str(raw.get("BJMC") or ""),
+        grade=str(raw.get("NJ") or ""),
+        grade_display=str(raw.get("NJ_DISPLAY") or ""),
+        department=str(raw.get("YXDM") or ""),
+        department_display=str(raw.get("YXDM_DISPLAY") or ""),
+        major=str(raw.get("ZYDM") or ""),
+        major_display=str(raw.get("ZYDM_DISPLAY") or ""),
+        is_scheduled=_to_bool(raw.get("SFYPK")),
+        student_count=int(raw.get("SJRS") or 0),
+        initial_count=int(raw.get("CSRS") or 0),
         raw=raw,
     )
 
