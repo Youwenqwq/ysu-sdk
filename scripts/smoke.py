@@ -265,13 +265,14 @@ def _to_jsonable(obj: Any, *, include_raw: bool = False) -> Any:
     return obj
 
 
-def smoke_dump(cas: CASClient, term: str | None, output: Path, *, include_raw: bool = False) -> None:
+def smoke_dump(cas: CASClient, term: str | None, output: Path, *, include_raw: bool = False, sections: set[str] | None = None) -> None:
     """把 SDK 全部只读方法的数据导出到 JSON 文件。
 
     尽力而为：单个方法失败（如「未到评教时间」）不中断，记入 ``errors`` 字段。
     会产生较多请求（约 40 个），调用间隔受 ``--pace`` 控制。
     """
     from ysu_sdk.jwxt import JWXTClient
+    from ysu_sdk.ldxt import LdxtClient
     from ysu_sdk.xgxt import XGXTClient
 
     dump: dict[str, Any] = {
@@ -280,10 +281,13 @@ def smoke_dump(cas: CASClient, term: str | None, output: Path, *, include_raw: b
         "cas": {"authenticated": True},
         "jwxt": {},
         "xgxt": {},
+        "ldxt": {},
         "errors": [],
     }
 
     def collect(section: str, key: str, fn: Callable[[], Any]) -> Any:
+        if sections is not None and section not in sections:
+            return None
         try:
             value = fn()
         except Exception as exc:  # dump 尽力而为，单个失败不中断
@@ -385,6 +389,12 @@ def smoke_dump(cas: CASClient, term: str | None, output: Path, *, include_raw: b
             collect("xgxt", f"academic_report[{y.year}]",
                     lambda y=y: xgxt.query_academic_report(y.year))
 
+    # ── Ldxt（劳动教育）──
+    ldxt = LdxtClient(cas)
+    collect("ldxt", "labor_records", ldxt.query_labor_records)
+    collect("ldxt", "labor_summary", ldxt.query_labor_summary)
+    collect("ldxt", "enrollable_activities", ldxt.query_enrollable_activities)
+
     output.write_text(json.dumps(dump, ensure_ascii=False, indent=2), encoding="utf-8")
     print(f"\n已写入 {output}（{len(dump['errors'])} 个方法被跳过，详见 errors 字段）")
 
@@ -404,6 +414,8 @@ def main() -> int:
                         help="dump 模式的输出文件（默认 ysu_dump_<时间戳>.json）")
     parser.add_argument("--raw", action="store_true",
                         help="dump 模式附带接口原始响应（raw 字段），默认只导出封装字段")
+    parser.add_argument("--sections", default=None, metavar="LIST",
+                        help="dump 模式只导出指定板块，逗号分隔（如 jwxt,ldxt），默认全部")
     args = parser.parse_args()
 
     global _pace_seconds
@@ -431,7 +443,12 @@ def main() -> int:
             output = Path(args.output) if args.output else Path(
                 f"ysu_dump_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
             )
-            smoke_dump(cas, args.term, output, include_raw=args.raw)
+            sections = (
+                {s.strip() for s in args.sections.split(",") if s.strip()}
+                if args.sections
+                else None
+            )
+            smoke_dump(cas, args.term, output, include_raw=args.raw, sections=sections)
     except CASError as exc:
         print(f"\n[FAIL] {type(exc).__name__}: {exc}", file=sys.stderr)
         return 1
