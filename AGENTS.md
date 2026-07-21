@@ -165,6 +165,19 @@ query_evaluation_types  →  query_pending_evaluations  →  get_evaluation_deta
 
 `constants.py` groups `APP_IDS` and `API_PATHS` by feature with `# —— … ——` headers (成绩查询 / 课表 / 学籍 / 考试 / 学生评教). Entries marked `（未使用）` are kept as references for future work but not wired through `JWXTClient`. When adding a new endpoint, place it under the matching header and add a one-line Chinese comment describing the API.
 
+### Scxt (`ysu_sdk.scxt`)
+
+创新创业学分认定系统（裸 IP `202.206.247.49/ysu_xf`，与 ldxt 同厂商）。**认证完全不同**：本系统未注册为 CAS service（服务端 CAS 配置残留 `cas.example.com` 占位符，直连流程是坏的），必须经双创平台（`/ysu_pt`）中转：
+
+1. `cas.authorize(/ysu_pt/UnifiedAuth/CASLogin)` —— 平台 `.loginAuth`；
+2. GET `/ysu_pt/System/Platform/AccessSubsystem/{固定guid}`（**必须带平台主页 Referer**，否则 302 回平台根）；
+3. GET 302 给出的 `authserver/access?access=…` 票据（同样带 Referer）→ 302 LoginRole；
+4. **预热**：跟随落地链后再 GET 一次 `/ysu_xf/System/Home/Index`——服务端会话状态经主页初始化，否则列表页**少渲染列**（实测「成绩」列在预热前不存在于 HTML，与视口/UA 无关）。
+
+- 表格解析与 ldxt 共享 `ysu_sdk/_table.py`（从 ldxt 包内提升）。
+- 批次陷阱：学分汇总 `BatchID=""` ≠ 全部，服务端默认只给当前批次；全量 = 解析申报页 `BatchID` 下拉框 → 逐批次查询（`query_all_credit_records`）。
+- 竞赛库 1448 条 / 活动库 132 条，固定每页 20，`pageIndex=N` 翻页，`PageSize` 参数被忽略；分页信息从「共N页M条记录」文本正则提取。
+
 ### JWMobile (`ysu_sdk.jwmobile`)
 
 移动教务（课程签到）。**与 jwxt 子包完全解耦**：不共用 session、不 import jwxt；唯一的组合点是 `CourseLike` Protocol（结构化鸭子类型），jwxt 的 `Course` 天然满足但编译期互不相识。
@@ -176,7 +189,7 @@ query_evaluation_types  →  query_pending_evaluations  →  get_evaluation_deta
 
 ### Ldxt (`ysu_sdk.ldxt`)
 
-劳动教育实践课程管理平台（ldxt.ysu.edu.cn，南京先极科技）。**非 EMAP**：ASP.NET MVC 服务端渲染，无 JSON 信封，数据靠标准库 `html.parser` 抽 HTML 表格（`_table.py`，私有模块）。
+劳动教育实践课程管理平台（ldxt.ysu.edu.cn，南京先极科技）。**非 EMAP**：ASP.NET MVC 服务端渲染，无 JSON 信封，数据靠标准库 `html.parser` 抽 HTML 表格（`ysu_sdk/_table.py`，与 scxt 共享）。
 
 - **SSO 三步握手**：`cas.authorize(/About/UnifiedAuthenticationLogin)` 出票种 `.DotNetCasClientAuth` → `POST` 同端点确认（JSON `Success`+`Data.Url`）→ GET 角色落地 URL（通常 `/System/User/LoginRole`）。只 authorize 主页不够——票据消费端点是 UnifiedAuthenticationLogin。
 - 登录页判定用**精确路径相等**（`/System/User/Login`），子串匹配会误杀 `LoginRole`。

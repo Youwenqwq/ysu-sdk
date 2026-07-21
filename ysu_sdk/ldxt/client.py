@@ -9,7 +9,7 @@ from urllib.parse import urlsplit
 import requests
 
 from ysu_sdk._datetime import to_iso_datetime
-from ysu_sdk.ldxt._table import TableData, parse_tables
+from ysu_sdk._table import TableData, parse_tables
 from ysu_sdk.ldxt.constants import (
     BASE_URL,
     DEFAULT_PAGE_SIZE,

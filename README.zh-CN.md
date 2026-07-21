@@ -9,6 +9,7 @@
 - `ysu_sdk.xgxt`：查询学工系统（`xgxt.ysu.edu.cn`）「综合测评」应用的综测成绩、班级/年级排名、指标明细、雷达对比与学业成绩报告（全部只读）。
 - `ysu_sdk.jwmobile`：移动教务课程签到——当前课程活动、签到详情/状态查询，以及 `sign()` 签到（本包唯一写操作）。
 - `ysu_sdk.ldxt`：劳动教育实践课程管理平台（ASP.NET 服务端渲染）——劳动时长记录、学分汇总、活动报名列表，全部只读。
+- `ysu_sdk.scxt`：创新创业学分认定系统（同厂商）——学分申报记录、分批次的认定记录、学分总表、竞赛库/活动库目录，全部只读。
 
 ## 安装
 
@@ -307,6 +308,26 @@ activities = ldxt.query_enrollable_activities()  # 报名是写操作，未封�
 
 劳动教育系统是 ASP.NET 服务端渲染（无 JSON 信封），SDK 用标准库解析器
 抽取 HTML 表格，零额外依赖。
+
+## 双创学分（scxt）用法
+
+```python
+from ysu_sdk.cas import CASClient, CASCredential
+from ysu_sdk.scxt import ScxtClient
+
+scxt = ScxtClient(CASClient(credential=CASCredential.load()))
+
+for d in scxt.query_credit_declarations():
+    print(d.item_name, d.score, d.status)
+
+summary = scxt.query_credit_summary()       # 总学分/成绩
+records = scxt.query_all_credit_records()   # 遍历全部批次
+comps = scxt.query_competitions(item_name="挑战杯")  # 分页目录
+```
+
+本系统不是直接注册的 CAS 服务，认证经 `ysu_pt` 平台桥中转，客户端已封装
+完整握手。注意学分汇总服务端默认只给当前批次，全量请用
+`query_all_credit_records()`。
 
 ## 故障排查：校外网络与 WAF
 

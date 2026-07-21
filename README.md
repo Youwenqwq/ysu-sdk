@@ -21,6 +21,9 @@ gateway (`cer.ysu.edu.cn`) and educational administration system
   sign-in detail/status, and `sign()` (the package's only write operation).
 - `ysu_sdk.ldxt` — labor-education platform (ASP.NET, server-rendered):
   labor-hour records, credit summary, enrollable activity list. Read-only.
+- `ysu_sdk.scxt` — innovation/entrepreneurship credit system (same vendor):
+  credit declarations, recognized-credit records per batch, credit summary,
+  competition/activity catalogs. Read-only.
 
 ## Install
 
@@ -331,6 +334,27 @@ activities = ldxt.query_enrollable_activities()  # enrollment is a write, not wr
 
 The labor system is ASP.NET server-rendered (no JSON envelope); the SDK
 extracts the HTML tables with the stdlib parser — no extra dependencies.
+
+## Innovation credits (scxt) usage
+
+```python
+from ysu_sdk.cas import CASClient, CASCredential
+from ysu_sdk.scxt import ScxtClient
+
+scxt = ScxtClient(CASClient(credential=CASCredential.load()))
+
+for d in scxt.query_credit_declarations():
+    print(d.item_name, d.score, d.status)
+
+summary = scxt.query_credit_summary()       # total credits / grade
+records = scxt.query_all_credit_records()   # iterates every batch
+comps = scxt.query_competitions(item_name="挑战杯")  # paged catalog
+```
+
+Authentication goes through the `ysu_pt` platform bridge (this system is not
+a directly registered CAS service); the client handles the whole handshake.
+Note the credit-record view defaults to the current batch server-side —
+`query_all_credit_records()` walks all batches.
 
 ## Troubleshooting: off-campus networks and the WAF
 

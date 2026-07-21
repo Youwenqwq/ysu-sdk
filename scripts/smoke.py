@@ -242,6 +242,33 @@ def smoke_ldxt(cas: CASClient) -> None:
 
 
 # ──────────────────────────────────────────────────────────────────────────── #
+# 双创学分（scxt）
+# ──────────────────────────────────────────────────────────────────────────── #
+
+
+def smoke_scxt(cas: CASClient) -> None:
+    from ysu_sdk.scxt import ScxtClient
+
+    print("== 创新创业学分认定系统（scxt） ==")
+    scxt = ScxtClient(cas)
+
+    decls = scxt.query_credit_declarations()
+    ok(f"申报记录: {len(decls)} 条, 分值合计={sum(d.score or 0 for d in decls)}")
+    pace()
+
+    summary = scxt.query_credit_summary()
+    ok(f"学分汇总: {summary.name} 总学分={summary.total_credits} 成绩={summary.grade}")
+    pace()
+
+    records = scxt.query_all_credit_records()
+    ok(f"全部认定记录: {len(records)} 条")
+    pace()
+
+    comps = scxt.query_competitions()
+    ok(f"竞赛库: {comps.total_records} 条 {comps.total_pages} 页")
+
+
+# ──────────────────────────────────────────────────────────────────────────── #
 # 全量数据导出
 # ──────────────────────────────────────────────────────────────────────────── #
 
@@ -273,6 +300,7 @@ def smoke_dump(cas: CASClient, term: str | None, output: Path, *, include_raw: b
     """
     from ysu_sdk.jwxt import JWXTClient
     from ysu_sdk.ldxt import LdxtClient
+    from ysu_sdk.scxt import ScxtClient
     from ysu_sdk.xgxt import XGXTClient
 
     dump: dict[str, Any] = {
@@ -282,6 +310,7 @@ def smoke_dump(cas: CASClient, term: str | None, output: Path, *, include_raw: b
         "jwxt": {},
         "xgxt": {},
         "ldxt": {},
+        "scxt": {},
         "errors": [],
     }
 
@@ -395,6 +424,15 @@ def smoke_dump(cas: CASClient, term: str | None, output: Path, *, include_raw: b
     collect("ldxt", "labor_summary", ldxt.query_labor_summary)
     collect("ldxt", "enrollable_activities", ldxt.query_enrollable_activities)
 
+    # ── Scxt（双创学分）──
+    scxt = ScxtClient(cas)
+    collect("scxt", "credit_declarations", scxt.query_credit_declarations)
+    collect("scxt", "credit_summary", scxt.query_credit_summary)
+    collect("scxt", "credit_batches", scxt.query_credit_batches)
+    collect("scxt", "credit_records_all", scxt.query_all_credit_records)
+    collect("scxt", "competitions_page1", scxt.query_competitions)
+    collect("scxt", "activities_page1", scxt.query_activities)
+
     output.write_text(json.dumps(dump, ensure_ascii=False, indent=2), encoding="utf-8")
     print(f"\n已写入 {output}（{len(dump['errors'])} 个方法被跳过，详见 errors 字段）")
 
@@ -403,7 +441,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(
         description="ysu-sdk 各模块活网冒烟（请求间隔默认 1s，勿调太低以免触发 WAF）"
     )
-    parser.add_argument("module", choices=["cas", "jwxt", "xgxt", "mobile", "ldxt", "all", "dump"])
+    parser.add_argument("module", choices=["cas", "jwxt", "xgxt", "mobile", "ldxt", "scxt", "all", "dump"])
     parser.add_argument("--pace", type=float, default=1.0, metavar="SECONDS",
                         help="每组请求之间的间隔秒数（默认 1.0）")
     parser.add_argument("--term", default=None,
@@ -438,6 +476,9 @@ def main() -> int:
             pace()
         if args.module in ("ldxt", "all"):
             smoke_ldxt(cas)
+            pace()
+        if args.module in ("scxt", "all"):
+            smoke_scxt(cas)
             pace()
         if args.module == "dump":
             output = Path(args.output) if args.output else Path(
