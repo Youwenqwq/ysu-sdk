@@ -38,6 +38,7 @@ from ysu_sdk.jwmobile.types import (
     CourseLike,
     CurrentLesson,
     LessonActivity,
+    MobileUserInfo,
     SigninActivityDetail,
     SigninStatus,
 )
@@ -394,6 +395,52 @@ class MobileClient:
             week_day=week_day if week_day is not None else course.week_day,
             start_node=course.start_section,
             end_node=course.end_section,
+        )
+
+    # ──────────────────────────────────────────────────────────────────── #
+    # 用户信息
+    # ──────────────────────────────────────────────────────────────────── #
+
+    @_with_mobile_reauth
+    def query_user_info(self) -> MobileUserInfo:
+        """查询移动端用户信息（``GET biz/user/info``，含头像 URL）。
+
+        该端点为 GET 且字段在顶层（无 ``data`` 包装），与 v410 业务
+        接口形态不同，单独处理。
+        """
+        url = f"{JWXT_BASE_URL}/jwmobile/biz/user/info"
+        try:
+            resp = self.session.get(url, timeout=self.timeout)
+        except requests.RequestException as exc:
+            raise MobileProtocolError(f"request failed for {url}: {exc}") from exc
+        if resp.status_code in (401, 403):
+            raise MobileNotLoggedInError(f"HTTP {resp.status_code} from {url}")
+        if resp.status_code >= 400:
+            raise MobileProtocolError(f"HTTP {resp.status_code} from {url}")
+        try:
+            result: dict[str, Any] = resp.json()
+        except (ValueError, TypeError) as exc:
+            raise MobileProtocolError(
+                f"non-JSON response from {url}: {resp.text[:200]!r}"
+            ) from exc
+        code = result.get("code")
+        if code in (401, "401"):
+            raise MobileNotLoggedInError(f"user info authentication failed: {url}")
+        if code not in _SUCCESS_CODES:
+            raise MobileBusinessError(
+                code if isinstance(code, (str, int)) else None,
+                result.get("msg") if isinstance(result.get("msg"), str) else None,
+                url,
+            )
+        return MobileUserInfo(
+            name=str(result.get("xm") or ""),
+            student_id=str(result.get("xh") or ""),
+            class_name=str(result.get("className") or ""),
+            major=str(result.get("zymc") or ""),
+            department=str(result.get("yxmc") or ""),
+            grade=str(result.get("xznj") or ""),
+            avatar_url=str(result.get("avatar") or ""),
+            raw=result,
         )
 
     # ──────────────────────────────────────────────────────────────────── #

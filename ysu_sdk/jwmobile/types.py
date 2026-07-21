@@ -73,6 +73,33 @@ class SigninActivityDetail:
 
 
 @dataclass(frozen=True, slots=True)
+class MobileUserInfo:
+    """移动端用户信息（``biz/user/info``）。
+
+    与 jwxt 的 :class:`ysu_sdk.jwxt.StudentInfo` 互补：字段更少，
+    但独有头像 URL。
+
+    Attributes:
+        name: 姓名（``xm``）
+        student_id: 学号（``xh``）
+        class_name: 班级（``className``）
+        major: 专业（``zymc``）
+        department: 学院（``yxmc``）
+        grade: 年级（``xznj``）
+        avatar_url: 头像 URL（``avatar``）
+    """
+
+    name: str = ""
+    student_id: str = ""
+    class_name: str = ""
+    major: str = ""
+    department: str = ""
+    grade: str = ""
+    avatar_url: str = ""
+    raw: dict[str, Any] = field(default_factory=dict, repr=False)
+
+
+@dataclass(frozen=True, slots=True)
 class SigninStatus:
     """学生签到状态（``querySigninDetail`` 与 ``sign`` 同构返回）。
 

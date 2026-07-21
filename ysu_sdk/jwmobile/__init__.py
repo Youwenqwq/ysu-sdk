@@ -12,6 +12,7 @@ from ysu_sdk.jwmobile.types import (
     CourseLike,
     CurrentLesson,
     LessonActivity,
+    MobileUserInfo,
     SigninActivityDetail,
     SigninStatus,
 )
@@ -26,6 +27,7 @@ __all__ = [
     "CourseLike",
     "CurrentLesson",
     "LessonActivity",
+    "MobileUserInfo",
     "SigninActivityDetail",
     "SigninStatus",
 ]
