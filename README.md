@@ -17,6 +17,8 @@ gateway (`cer.ysu.edu.cn`) and educational administration system
 - `ysu_sdk.xgxt` — read-only queries against the 综合测评 (comprehensive
   evaluation) app of the student-affairs system (`xgxt.ysu.edu.cn`): scores,
   class/grade rankings, indicator details, radar comparison, academic report.
+- `ysu_sdk.jwmobile` — mobile-app course sign-in: current lesson activities,
+  sign-in detail/status, and `sign()` (the package's only write operation).
 
 ## Install
 
@@ -280,6 +282,35 @@ page = xgxt.query_academic_report()                # defaults to the server's de
 All methods are read-only. `XGXTClient` mirrors `JWXTClient`'s lazy re-auth,
 session snapshots (`XGXTSession`), and exception layering (`XGXTProtocolError`
 / `XGXTBusinessError` / `NotLoggedInError`).
+
+## Mobile sign-in (jwmobile) usage
+
+Independent from the jwxt EMAP session: the mobile client completes CAS SSO,
+captures a JWT from the redirect chain, and calls the mobile biz API with it.
+
+```python
+from ysu_sdk.cas import CASClient, CASCredential
+from ysu_sdk.jwxt import JWXTClient
+from ysu_sdk.jwmobile import MobileClient
+
+cas = CASClient(credential=CASCredential.load())
+mobile = MobileClient(cas)
+
+# Discover today's lessons via jwxt, then query activities on the mobile side
+jwxt = JWXTClient(cas)
+week = jwxt.query_current_week().week
+for course in jwxt.query_courses_on_date():
+    lesson = mobile.query_current_lesson_for_course(course, week)
+    for activity in lesson.activities:
+        detail = mobile.query_signin_detail(activity.activity_id)
+        status = mobile.query_signin_status(activity.activity_id)
+        # mobile.sign(activity.activity_id)  # write: actually signs you in
+```
+
+`sign()` is a write operation (your own attendance) and the only one in this
+package. `query_current_lesson_for_course` accepts any object with the
+`CourseLike` fields (jwxt's `Course` qualifies); the two packages never
+import each other.
 
 ## Troubleshooting: off-campus networks and the WAF
 

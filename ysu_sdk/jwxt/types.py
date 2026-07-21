@@ -21,6 +21,11 @@ class Course:
         weeks: 上课周次描述
         weeks_bitmap: 上课周次位图（``SKZC``，第 N 个字符为 ``"1"`` 表示第 N 周有课；
             非位图形态时为空串）
+        class_id: 教学班 ID（``JXBID``，移动端签到等接口的课程标识）
+        schedule_id: 课表 ID（``KBID``，移动端 ``queryCurrentLesson`` 的参数）
+        class_type: 教学班类型代码（``JXBLX``，缺省 ``"1"``；非 ``"1"`` 时移动端
+            课程标识取 ``experiment_type_code``）
+        experiment_type_code: 实验性质代码（``SYXZDM``，实验课的课程标识）
         credit: 学分
         course_type: 课程性质
     """
@@ -34,6 +39,10 @@ class Course:
     end_section: int = 0
     weeks: str = ""
     weeks_bitmap: str = ""
+    class_id: str = ""
+    schedule_id: str = ""
+    class_type: str = ""
+    experiment_type_code: str = ""
     credit: str = ""
     course_type: str = ""
     raw: dict[str, Any] = field(default_factory=dict, repr=False)

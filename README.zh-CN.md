@@ -7,6 +7,7 @@
 - `ysu_sdk.cas`：负责 `cer.ysu.edu.cn` 网关上的登录、MFA、凭据持久化以及跨 service 出票。
 - `ysu_sdk.jwxt`：基于已认证的 CAS 会话，查询教务系统（`jwxt.ysu.edu.cn`）的成绩、课表、全校班级课表、考试、学生信息、培养方案、学业完成与预警，以及学生评教（含提交答卷）。
 - `ysu_sdk.xgxt`：查询学工系统（`xgxt.ysu.edu.cn`）「综合测评」应用的综测成绩、班级/年级排名、指标明细、雷达对比与学业成绩报告（全部只读）。
+- `ysu_sdk.jwmobile`：移动教务课程签到——当前课程活动、签到详情/状态查询，以及 `sign()` 签到（本包唯一写操作）。
 
 ## 安装
 
@@ -259,6 +260,34 @@ page = xgxt.query_academic_report()                # 默认服务端默认学年
 所有方法均为只读。`XGXTClient` 与 `JWXTClient` 模式一致：懒回退重认证、
 会话快照（`XGXTSession`）、异常分层（`XGXTProtocolError` /
 `XGXTBusinessError` / `NotLoggedInError`）。
+
+## 移动教务（jwmobile）用法
+
+与桌面端 EMAP 会话相互独立：移动端客户端完成 CAS SSO 后从跳转链捕获
+JWT，并以 cookie 携带调用移动 biz 接口。
+
+```python
+from ysu_sdk.cas import CASClient, CASCredential
+from ysu_sdk.jwxt import JWXTClient
+from ysu_sdk.jwmobile import MobileClient
+
+cas = CASClient(credential=CASCredential.load())
+mobile = MobileClient(cas)
+
+# 经 jwxt 发现今日课程，再在移动端查询活动
+jwxt = JWXTClient(cas)
+week = jwxt.query_current_week().week
+for course in jwxt.query_courses_on_date():
+    lesson = mobile.query_current_lesson_for_course(course, week)
+    for activity in lesson.activities:
+        detail = mobile.query_signin_detail(activity.activity_id)
+        status = mobile.query_signin_status(activity.activity_id)
+        # mobile.sign(activity.activity_id)  # 写操作：实际完成签到
+```
+
+`sign()` 是写操作（本人考勤签到），也是本包唯一写操作。
+`query_current_lesson_for_course` 接受任何满足 `CourseLike` 字段的对象
+（jwxt 的 `Course` 即满足）；两个包互不 import。
 
 ## 故障排查：校外网络与 WAF
 

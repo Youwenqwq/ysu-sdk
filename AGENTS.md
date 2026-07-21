@@ -165,6 +165,15 @@ query_evaluation_types  →  query_pending_evaluations  →  get_evaluation_deta
 
 `constants.py` groups `APP_IDS` and `API_PATHS` by feature with `# —— … ——` headers (成绩查询 / 课表 / 学籍 / 考试 / 学生评教). Entries marked `（未使用）` are kept as references for future work but not wired through `JWXTClient`. When adding a new endpoint, place it under the matching header and add a one-line Chinese comment describing the API.
 
+### JWMobile (`ysu_sdk.jwmobile`)
+
+移动教务（课程签到）。**与 jwxt 子包完全解耦**：不共用 session、不 import jwxt；唯一的组合点是 `CourseLike` Protocol（结构化鸭子类型），jwxt 的 `Course` 天然满足但编译期互不相识。
+
+- **认证流与 EMAP 不同**：CAS `authorize(/jwmobile/auth/index)` 落地 JSESSIONID 后，再 GET 认证入口并**手动跟随跳转链**，从重定向 `Location` 里正则提取 `token=`——注意 token 在 **fragment**（`#/…?token=…`，SPA 路由）而非 query 里，解析时必须匹配整串。JWT 以 `Authorization` cookie（path `/jwmobile`）携带。
+- **Envelope 是 `code:200`**（不是 EMAP 的 `code:"0"`；200/0 均算成功，401 触发懒重认证），业务调用为 JSON POST 到 `/jwmobile/biz/v410`。
+- `sign()` 是全包唯一写操作（本人签到）。已结束的活动会返回 `code=404 msg=Sign-in Expired` 的业务拒绝——可用于安全验证写路径。
+- `query_current_lesson_for_course` 封装 teachClassId 解析规则（`class_type=="1"` 取 JXBID，否则取 SYXZDM）；`Course` 上的 `class_id/schedule_id/class_type/experiment_type_code` 字段为此而补。
+
 ### XGXT (`ysu_sdk.xgxt`)
 
 学工系统（`xgxt.ysu.edu.cn`）「综合测评」应用的只读查询。Scope is deliberately limited to the 综测成绩 tab: evaluation terms, score+ranking, indicator details, radar comparison, year overview, and the academic report popup. 测评公示 / 综测打分 are intentionally not implemented (the latter is a write surface).

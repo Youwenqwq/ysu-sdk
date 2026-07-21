@@ -13,6 +13,7 @@ from typing import Any, Callable, TypeVar
 
 import requests
 
+from ysu_sdk._datetime import to_iso_date, to_iso_datetime
 from ysu_sdk.cas.client import CASClient
 from ysu_sdk.jwxt.constants import (
     APP_IDS,
@@ -145,37 +146,10 @@ def _to_bool(val: Any) -> bool:
     return str(val) in _TRUTHY_TOKENS
 
 
-# —— 日期/时间格式归一（学校接口至少有四种日期写法） ——
+# —— 日期/时间格式归一（共享实现见 ysu_sdk._datetime） ——
 
-_ISO_DATE_RE = re.compile(r"^(\d{4})[-./](\d{1,2})[-./](\d{1,2})$")
-_ISO_DATETIME_RE = re.compile(
-    r"^(\d{4})[-./](\d{1,2})[-./](\d{1,2})[T ](\d{1,2}):(\d{2}):(\d{2})$"
-)
-
-
-def _to_iso_date(val: Any) -> str:
-    """把已知日期格式归一为 ``YYYY-MM-DD``；未识别的原样透传。"""
-    s = str(val or "").strip()
-    m = _ISO_DATE_RE.match(s)
-    if m:
-        y, mo, d = m.groups()
-        return f"{y}-{int(mo):02d}-{int(d):02d}"
-    return str(val or "")
-
-
-def _to_iso_datetime(val: Any) -> str:
-    """把已知日期时间格式归一为 RFC3339（``YYYY-MM-DDTHH:MM:SS``）。
-
-    覆盖观测到的三种上游写法（``YYYY-MM-DD HH:MM:SS``、
-    ``YYYY.MM.DD HH:MM:SS``、``YYYY-MM-DDTHH:MM:SS``）；未识别的原样
-    透传——字符串契约下「偶尔不统一」不等于数据丢失。
-    """
-    s = str(val or "").strip()
-    m = _ISO_DATETIME_RE.match(s)
-    if m:
-        y, mo, d, h, mi, se = m.groups()
-        return f"{y}-{int(mo):02d}-{int(d):02d}T{int(h):02d}:{mi}:{se}"
-    return str(val or "")
+_to_iso_date = to_iso_date
+_to_iso_datetime = to_iso_datetime
 
 
 _EXAM_TIME_RANGE_RE = re.compile(r"(\d{1,2}:\d{2})\s*[-–~]\s*(\d{1,2}:\d{2})")
@@ -1771,6 +1745,10 @@ def _parse_course(raw: dict[str, Any]) -> Course:
         end_section=int(raw.get("JSJC") or 0),
         weeks=str(raw.get("ZCMC") or ""),
         weeks_bitmap=_weeks_bitmap(raw.get("SKZC")),
+        class_id=str(raw.get("JXBID") or ""),
+        schedule_id=str(raw.get("KBID") or ""),
+        class_type=str(raw.get("JXBLX") or "1"),
+        experiment_type_code=str(raw.get("SYXZDM") or ""),
         credit=str(raw.get("XF") or ""),
         course_type=str(raw.get("KCXZDM") or ""),
         raw=raw,

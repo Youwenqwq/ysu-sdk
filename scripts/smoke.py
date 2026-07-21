@@ -188,6 +188,36 @@ def smoke_xgxt(cas: CASClient) -> None:
 
 
 # ──────────────────────────────────────────────────────────────────────────── #
+# 移动教务（课程签到）
+# ──────────────────────────────────────────────────────────────────────────── #
+
+
+def smoke_mobile(cas: CASClient) -> None:
+    from ysu_sdk.jwxt import JWXTClient
+    from ysu_sdk.jwmobile import MobileClient
+
+    print("== 移动教务（jwmobile） ==")
+    mobile = MobileClient(cas)
+    mobile._ensure_authorized()
+    ok("移动端认证（JWT 捕获）")
+    pace()
+
+    jwxt = JWXTClient(cas)
+    cw = jwxt.query_current_week()
+    ok(f"当前周次: 第{cw.week}周 周{cw.weekday}")
+    pace()
+
+    today = jwxt.query_courses_on_date()
+    if not today:
+        ok("今天无课（假期），跳过课程活动查询")
+        return
+    for c in today[:3]:
+        lesson = mobile.query_current_lesson_for_course(c, cw.week)
+        ok(f"{c.name}: 活动数={len(lesson.activities)}")
+        pace()
+
+
+# ──────────────────────────────────────────────────────────────────────────── #
 # 全量数据导出
 # ──────────────────────────────────────────────────────────────────────────── #
 
@@ -339,7 +369,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(
         description="ysu-sdk 各模块活网冒烟（请求间隔默认 1s，勿调太低以免触发 WAF）"
     )
-    parser.add_argument("module", choices=["cas", "jwxt", "xgxt", "all", "dump"])
+    parser.add_argument("module", choices=["cas", "jwxt", "xgxt", "mobile", "all", "dump"])
     parser.add_argument("--pace", type=float, default=1.0, metavar="SECONDS",
                         help="每组请求之间的间隔秒数（默认 1.0）")
     parser.add_argument("--term", default=None,
@@ -366,6 +396,10 @@ def main() -> int:
             pace()
         if args.module in ("xgxt", "all"):
             smoke_xgxt(cas)
+            pace()
+        if args.module in ("mobile", "all"):
+            smoke_mobile(cas)
+            pace()
         if args.module == "dump":
             output = Path(args.output) if args.output else Path(
                 f"ysu_dump_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
