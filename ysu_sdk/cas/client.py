@@ -31,6 +31,7 @@ from ysu_sdk.cas.constants import (
 )
 from ysu_sdk.cas.credential import CASCredential
 from ysu_sdk.cas.exceptions import (
+    CASNetworkError,
     CASProtocolError,
     IPBlockedError,
     LoginFailedError,
@@ -80,6 +81,10 @@ class CASClient:
         实现：``GET /authserver/index.do``，``allow_redirects=False``。
         - 302 到登录页 → ``False``；
         - 200 或 302 到非登录页 → ``True``。
+
+        Raises:
+            CASNetworkError: 网关不可达（连接被拒、超时、被 WAF 重置等）。
+                不会把传输层失败误报为「未认证」。
         """
         try:
             resp = self.session.get(
@@ -87,8 +92,8 @@ class CASClient:
                 allow_redirects=False,
                 timeout=self.timeout,
             )
-        except requests.RequestException:
-            return False
+        except requests.RequestException as exc:
+            raise CASNetworkError(f"CAS gateway unreachable: {exc}") from exc
         if resp.status_code in (301, 302, 303, 307, 308):
             location = resp.headers.get("Location", "")
             return "/authserver/login" not in location

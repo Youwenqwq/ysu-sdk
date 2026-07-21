@@ -35,5 +35,14 @@ class NotAuthenticatedError(CASError):
     """未持有有效 TGC 时调用了需要登录态的方法（如 :meth:`authorize`）。"""
 
 
+class CASNetworkError(CASError):
+    """认证网关不可达：连接被拒、超时、被 WAF 重置等传输层失败。
+
+    与 :class:`CASProtocolError` 区分：协议异常指收到了响应但内容不符合
+    预期，本异常指根本没能完成 HTTP 交换。调用方应据此区分「网关/网络
+    故障」与「凭据失效」——例如 WAF 封禁 IP 时抛的就是本异常。
+    """
+
+
 class CASProtocolError(CASError):
     """与认证网关的交互结果与协议预期不符（重定向缺失、字段缺失等）。"""

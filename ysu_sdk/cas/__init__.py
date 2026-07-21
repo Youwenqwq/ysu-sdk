@@ -4,6 +4,7 @@ from ysu_sdk.cas.client import CASClient
 from ysu_sdk.cas.credential import CASCredential
 from ysu_sdk.cas.exceptions import (
     CASError,
+    CASNetworkError,
     CASProtocolError,
     IPBlockedError,
     LoginFailedError,
@@ -37,4 +38,5 @@ __all__ = [
     "MFARequiredError",
     "NeedCaptchaError",
     "NotAuthenticatedError",
+    "CASNetworkError",
 ]
