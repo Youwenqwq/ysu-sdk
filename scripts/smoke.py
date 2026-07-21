@@ -261,6 +261,10 @@ def smoke_dump(cas: CASClient, term: str | None, output: Path, *, include_raw: b
     collect("jwxt", "training_plan", jwxt.query_training_plan)
     collect("jwxt", "academic_completion", jwxt.query_academic_completion)
     collect("jwxt", "academic_warnings", jwxt.query_academic_warnings)
+    collect("jwxt", "unscheduled_theory_courses", lambda: jwxt.query_unscheduled_theory_courses(term=term))
+    collect("jwxt", "adjusted_courses", lambda: jwxt.query_adjusted_courses(term=term))
+    collect("jwxt", "overall_adjustments", lambda: jwxt.query_overall_adjustments(term=term))
+    collect("jwxt", "courses_on_date", lambda: jwxt.query_courses_on_date(term=term))
 
     # 成绩统计/分布/排名：以第一门成绩为样本，两种口径各调一次
     if grades:

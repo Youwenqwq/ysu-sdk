@@ -7,7 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 A Python SDK for Yanshan University's unified identity authentication (CAS) gateway at `cer.ysu.edu.cn` and the educational administration system (教务系统, `jwxt.ysu.edu.cn`).
 
 - `ysu_sdk.cas`: CAS login, MFA, credential persistence, and cross-`service` Service-Ticket issuance.
-- `ysu_sdk.jwxt`: Information queries for the educational administration system — grades, grade statistics/distribution/ranking (per teaching class or whole course), GPA stats, schedule (theory & experimental), exams, student info, training plan, academic completion, academic warnings, and student evaluation. **`submit_evaluation` is the sole write operation in this package** — every other public method is read-only. Don't add other write surfaces (course selection, applications) without an explicit ask; this SDK is intentionally narrow.
+- `ysu_sdk.jwxt`: Information queries for the educational administration system — grades, grade statistics/distribution/ranking (per teaching class or whole course), GPA stats, schedule (theory & experimental), unscheduled/adjusted courses, courses-on-date, exams, student info, training plan, academic completion, academic warnings, and student evaluation. **`submit_evaluation` is the sole write operation in this package** — every other public method is read-only. Don't add other write surfaces (course selection, applications) without an explicit ask; this SDK is intentionally narrow.
 - `ysu_sdk.xgxt`: Read-only queries for the student-affairs system's 综合测评 app — evaluation terms, scores with class/grade rankings, indicator details, radar comparison, year score overview, and academic report.
 
 The README is in Simplified Chinese; user-facing docstrings and exception messages should match.
@@ -115,6 +115,10 @@ Module-level helpers reduce parsing duplication:
 #### Schedule/unscheduled-courses share a private impl
 
 `query_schedule_experimental` and `query_unscheduled_courses` differ only in API path and `_extract_rows` key — both POST `XNXQDM/XH/KBLB` against the same `wdkb_sy` `_WEU`. The shared body lives in `_query_courses_by_kblb(*, path_key, row_key, term, student_id, course_category)`. If you add another `KBLB`-driven endpoint, route it through this helper.
+
+#### Week bitmap — `SKZC` is shape-shifting
+
+In schedule rows (`cxxszhxqkb`, `querybjkb`) `SKZC` is a 0/1 **bitmap** (char N = week N); in `xswpkc` rows it's **text** (`"15-17周"`). Never parse it blindly: `_weeks_bitmap()` normalizes to bitmap-or-empty, and `_week_active(bitmap, week)` does the bounds-checked lookup. `Course.weeks_bitmap` is populated by the former; `UnscheduledCourse.weeks_text` keeps the latter. `query_courses_on_date(date)` chains `query_current_week` + `query_schedule` and filters on `week_day` + bitmap — no new endpoint involved.
 
 #### Grade statistics/distribution/ranking — `JXBID` vs `KCH` dispatch
 

@@ -13,6 +13,7 @@ from ysu_sdk.jwxt.types import (
     AcademicWarning,
     ClassPeriod,
     Course,
+    CourseAdjustment,
     CurrentWeek,
     EvaluationAnswer,
     EvaluationDetail,
@@ -24,11 +25,13 @@ from ysu_sdk.jwxt.types import (
     GradeDistribution,
     GradeRanking,
     GradeStatistics,
+    OverallAdjustment,
     Question,
     QuestionOption,
     StudentInfo,
     TermCalendar,
     TrainingPlan,
+    UnscheduledCourse,
 )
 
 __all__ = [
@@ -42,6 +45,7 @@ __all__ = [
     "AcademicWarning",
     "ClassPeriod",
     "Course",
+    "CourseAdjustment",
     "CurrentWeek",
     "EvaluationAnswer",
     "EvaluationDetail",
@@ -53,9 +57,11 @@ __all__ = [
     "GradeDistribution",
     "GradeRanking",
     "GradeStatistics",
+    "OverallAdjustment",
     "Question",
     "QuestionOption",
     "StudentInfo",
     "TermCalendar",
     "TrainingPlan",
+    "UnscheduledCourse",
 ]

@@ -21,6 +21,7 @@ from ysu_sdk.jwxt.types import (
     AcademicWarning,
     ClassPeriod,
     Course,
+    CourseAdjustment,
     CurrentWeek,
     EvaluationAnswer,
     EvaluationDetail,
@@ -32,11 +33,13 @@ from ysu_sdk.jwxt.types import (
     GradeDistribution,
     GradeRanking,
     GradeStatistics,
+    OverallAdjustment,
     Question,
     QuestionOption,
     StudentInfo,
     TermCalendar,
     TrainingPlan,
+    UnscheduledCourse,
 )
 
 
@@ -639,6 +642,94 @@ class JWXTClient:
             course_category=course_category,
         )
 
+    @_with_lazy_reauth
+    def query_unscheduled_theory_courses(
+        self,
+        *,
+        term: str | None = None,
+        week: int | None = None,
+    ) -> list[UnscheduledCourse]:
+        """查询学生未排课程（理论课表口径，对应 ``xswpkc``）。
+
+        与 :meth:`query_unscheduled_courses` 的区别：后者走实验课应用的
+        「理论实验未排课」接口，本方法走理论课表应用的「上课时间暂未确定的
+        课程」接口，返回含合班行政班列表的更详细信息。
+
+        Args:
+            term: 学年学期；为 ``None`` 则查询当前学期。
+            week: 教学周次（``SKZC``）；为 ``None`` 则不按周过滤。
+
+        Returns:
+            未排课程列表。
+        """
+        if term is None:
+            term = self._get_current_term(APP_IDS["studentWdksapApp"], "wdksap_dqxnxq")
+        self._ensure_weu(APP_IDS["wdkb"])
+
+        form = {"XNXQDM": term}
+        if week is not None:
+            form["SKZC"] = str(week)
+        datas = self._post(API_PATHS["wdkb_wpkc"], form)
+        rows = _extract_rows(datas, "xswpkc")
+        return [_parse_unscheduled_course(r) for r in rows]
+
+    @_with_lazy_reauth
+    def query_adjusted_courses(
+        self,
+        *,
+        term: str | None = None,
+        week: int | None = None,
+    ) -> list[CourseAdjustment]:
+        """查询学生调课课程记录（对应 ``xsdkkc``）。
+
+        Args:
+            term: 学年学期；为 ``None`` 则查询当前学期。
+            week: 教学周次（``SKZC``）；为 ``None`` 则不按周过滤。
+
+        Returns:
+            调课记录列表（含调整前后的时间与地点）。
+        """
+        if term is None:
+            term = self._get_current_term(APP_IDS["studentWdksapApp"], "wdksap_dqxnxq")
+        self._ensure_weu(APP_IDS["wdkb"])
+
+        form = {"XNXQDM": term, "*order": "-SQSJ"}
+        if week is not None:
+            form["SKZC"] = str(week)
+        datas = self._post(API_PATHS["wdkb_dkkc"], form)
+        rows = _extract_rows(datas, "xsdkkc")
+        return [_parse_course_adjustment(r) for r in rows]
+
+    @_with_lazy_reauth
+    def query_overall_adjustments(
+        self,
+        *,
+        term: str | None = None,
+        page_size: int = 100,
+        page_number: int = 1,
+    ) -> list[OverallAdjustment]:
+        """查询整体调课记录（对应 ``cxztdkjl``，全校/批次性调课）。
+
+        Args:
+            term: 学年学期；为 ``None`` 则查询当前学期。
+            page_size: 每页条数。
+            page_number: 页码（从 1 开始）。
+
+        Returns:
+            整体调课记录列表。
+        """
+        if term is None:
+            term = self._get_current_term(APP_IDS["studentWdksapApp"], "wdksap_dqxnxq")
+        self._ensure_weu(APP_IDS["wdkb"])
+
+        datas = self._post(API_PATHS["ztdkjl"], {
+            "XNXQDM": term,
+            "pageSize": str(page_size),
+            "pageNumber": str(page_number),
+        })
+        rows = _extract_rows(datas, "cxztdkjl")
+        return [_parse_overall_adjustment(r) for r in rows]
+
     def _query_courses_by_kblb(
         self,
         *,
@@ -742,6 +833,34 @@ class JWXTClient:
         if not rows:
             raise JWXTProtocolError("query_current_week returned empty result")
         return _parse_current_week(rows[0])
+
+    @_with_lazy_reauth
+    def query_courses_on_date(
+        self,
+        date: str | None = None,
+        *,
+        term: str | None = None,
+    ) -> list[Course]:
+        """查询指定日期当天有课的课程列表。
+
+        组合 :meth:`query_current_week`（日期 → 教学周次/星期）与
+        :meth:`query_schedule`（整学期课表），按 ``SKZC`` 周次位图与星期
+        过滤。课程的起止时间可用 :meth:`query_class_periods` 联查。
+
+        Args:
+            date: 日期字符串（``YYYY-MM-DD``）；为 ``None`` 则使用今天。
+            term: 学年学期；为 ``None`` 则使用当前学期。
+
+        Returns:
+            当天有课的课程列表。
+        """
+        cw = self.query_current_week(term=term, date=date)
+        courses = self.query_schedule(term=term)
+        return [
+            c
+            for c in courses
+            if c.week_day == cw.weekday and _week_active(c.weeks_bitmap, cw.week)
+        ]
 
     # ──────────────────────────────────────────────────────────────────── #
     # 考试安排
@@ -1169,6 +1288,21 @@ def _parse_grade_ranking(raw: dict[str, Any]) -> GradeRanking:
     )
 
 
+def _weeks_bitmap(val: Any) -> str:
+    """``SKZC`` 的位图形态归一：仅当全为 ``0``/``1`` 字符时认作位图。
+
+    部分接口（如 ``xswpkc``）的 ``SKZC`` 是 ``"15-17周"`` 这类文本，
+    此时返回空串，避免把文本误当位图解析。
+    """
+    s = str(val or "")
+    return s if s and set(s) <= {"0", "1"} else ""
+
+
+def _week_active(bitmap: str, week: int) -> bool:
+    """判断位图在第 ``week`` 周（1 起）是否有课。"""
+    return 1 <= week <= len(bitmap) and bitmap[week - 1] == "1"
+
+
 def _parse_course(raw: dict[str, Any]) -> Course:
     return Course(
         name=str(raw.get("KCM") or ""),
@@ -1179,8 +1313,50 @@ def _parse_course(raw: dict[str, Any]) -> Course:
         start_section=int(raw.get("KSJC") or 0),
         end_section=int(raw.get("JSJC") or 0),
         weeks=str(raw.get("ZCMC") or ""),
+        weeks_bitmap=_weeks_bitmap(raw.get("SKZC")),
         credit=str(raw.get("XF") or ""),
         course_type=str(raw.get("KCXZDM") or ""),
+        raw=raw,
+    )
+
+
+def _parse_unscheduled_course(raw: dict[str, Any]) -> UnscheduledCourse:
+    return UnscheduledCourse(
+        name=str(raw.get("KCM") or ""),
+        code=str(raw.get("KCH") or ""),
+        teacher=str(raw.get("SKJS") or ""),
+        credit=str(raw.get("XF") or ""),
+        class_id=str(raw.get("JXBID") or ""),
+        course_seq=str(raw.get("KXH") or ""),
+        weeks_text=str(raw.get("SKZC") or ""),
+        attending_classes=str(raw.get("SKBJ") or ""),
+        raw=raw,
+    )
+
+
+def _parse_course_adjustment(raw: dict[str, Any]) -> CourseAdjustment:
+    return CourseAdjustment(
+        name=str(raw.get("KCM") or ""),
+        class_id=str(raw.get("JXBID") or ""),
+        old_week_day=int(raw.get("SKXQ") or 0),
+        new_week_day=int(raw.get("XSKXQ") or 0),
+        old_start_section=int(raw.get("KSJC") or 0),
+        new_start_section=int(raw.get("XKSJC") or 0),
+        old_end_section=int(raw.get("JSJC") or 0),
+        new_end_section=int(raw.get("XJSJC") or 0),
+        old_weeks=str(raw.get("ZCMC") or ""),
+        new_weeks=str(raw.get("XZCMC") or ""),
+        new_classroom=str(raw.get("XJASDM") or ""),
+        apply_time=str(raw.get("SQSJ") or ""),
+        raw=raw,
+    )
+
+
+def _parse_overall_adjustment(raw: dict[str, Any]) -> OverallAdjustment:
+    return OverallAdjustment(
+        batch_name=str(raw.get("PCMC") or ""),
+        adjustment_type=str(raw.get("TKLXDM") or ""),
+        time_range=str(raw.get("TKSJDDM") or ""),
         raw=raw,
     )
 

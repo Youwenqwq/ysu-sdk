@@ -19,6 +19,8 @@ class Course:
         start_section: 起始节次
         end_section: 结束节次
         weeks: 上课周次描述
+        weeks_bitmap: 上课周次位图（``SKZC``，第 N 个字符为 ``"1"`` 表示第 N 周有课；
+            非位图形态时为空串）
         credit: 学分
         course_type: 课程性质
     """
@@ -31,8 +33,92 @@ class Course:
     start_section: int = 0
     end_section: int = 0
     weeks: str = ""
+    weeks_bitmap: str = ""
     credit: str = ""
     course_type: str = ""
+    raw: dict[str, Any] = field(default_factory=dict, repr=False)
+
+
+@dataclass(frozen=True, slots=True)
+class UnscheduledCourse:
+    """未排课程（理论课表口径，对应 ``xswpkc``）。
+
+    与 :class:`Course` 的区别：这些课程尚未安排具体时间地点，
+    因此没有星期/节次，只有周次范围文本与合班上课的行政班列表。
+
+    Attributes:
+        name: 课程名称（``KCM``）
+        code: 课程号（``KCH``）
+        teacher: 任课教师（``SKJS``）
+        credit: 学分（``XF``）
+        class_id: 教学班 ID（``JXBID``）
+        course_seq: 课序号（``KXH``）
+        weeks_text: 周次范围文本（``SKZC``，如 ``"15-17周"``）
+        attending_classes: 合班上课的行政班列表（``SKBJ``，逗号分隔）
+    """
+
+    name: str = ""
+    code: str = ""
+    teacher: str = ""
+    credit: str = ""
+    class_id: str = ""
+    course_seq: str = ""
+    weeks_text: str = ""
+    attending_classes: str = ""
+    raw: dict[str, Any] = field(default_factory=dict, repr=False)
+
+
+@dataclass(frozen=True, slots=True)
+class CourseAdjustment:
+    """调课课程记录（对应 ``xsdkkc``，模型 ``Tkjg``）。
+
+    记录一次调课调整前后的上课安排。字段以 ``new_`` 前缀表示调整后。
+
+    Attributes:
+        name: 课程名称（``KCM``）
+        class_id: 教学班 ID（``JXBID``）
+        old_week_day: 原上课星期（``SKXQ``）
+        new_week_day: 新上课星期（``XSKXQ``）
+        old_start_section: 原开始节次（``KSJC``）
+        new_start_section: 新开始节次（``XKSJC``）
+        old_end_section: 原结束节次（``JSJC``）
+        new_end_section: 新结束节次（``XJSJC``）
+        old_weeks: 原周次名称（``ZCMC``）
+        new_weeks: 新周次名称（``XZCMC``）
+        new_classroom: 新教室（``XJASDM``）
+        apply_time: 调课申请时间（``SQSJ``）
+    """
+
+    name: str = ""
+    class_id: str = ""
+    old_week_day: int = 0
+    new_week_day: int = 0
+    old_start_section: int = 0
+    new_start_section: int = 0
+    old_end_section: int = 0
+    new_end_section: int = 0
+    old_weeks: str = ""
+    new_weeks: str = ""
+    new_classroom: str = ""
+    apply_time: str = ""
+    raw: dict[str, Any] = field(default_factory=dict, repr=False)
+
+
+@dataclass(frozen=True, slots=True)
+class OverallAdjustment:
+    """整体调课记录（对应 ``cxztdkjl``）。
+
+    全校性/批次性的调课安排（如节假日整体调课）。
+
+    Attributes:
+        batch_name: 批次名称（``PCMC``）
+        adjustment_type: 调课类型（``TKLXDM``）
+        time_range: 调课时间段（``TKSJDDM``）
+    """
+
+    batch_name: str = ""
+    adjustment_type: str = ""
+    time_range: str = ""
     raw: dict[str, Any] = field(default_factory=dict, repr=False)
 
 

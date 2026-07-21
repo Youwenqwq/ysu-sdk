@@ -30,8 +30,9 @@ API_PATHS = {
 
     # —— 课表 ——
     "wdkb": "wdkb/modules/xskcb/cxxszhxqkb.do",                                  # 我的课表（理论课，按学年学期）
-    "wdkb_wpkc": "wdkb/modules/xskcb/xswpkc.do",                                 # 学生未排课程（未使用）
-    "wdkb_dkkc": "wdkb/modules/xskcb/xsdkkc.do",                                 # 学生调课课程（未使用）
+    "wdkb_wpkc": "wdkb/modules/xskcb/xswpkc.do",                                 # 学生未排课程（理论课表口径）
+    "wdkb_dkkc": "wdkb/modules/xskcb/xsdkkc.do",                                 # 学生调课课程
+    "ztdkjl": "wdkb/modules/jshkcb/cxztdkjl.do",                                 # 整体调课记录
     "wdkb_sy": "syxkjg/modules/wdkb/cxxskb.do",                                  # 我的课表（实验课）
     "wdkb_sy_unscheduled": "syxkjg/modules/wdkb/cxxsllsywpk.do",                 # 学生理论实验未排课
     "jc": "wdkb/modules/jshkcb/jc.do",                                           # 节次配置（每节课的起止时间）
