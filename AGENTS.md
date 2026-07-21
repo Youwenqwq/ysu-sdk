@@ -174,6 +174,16 @@ query_evaluation_types  →  query_pending_evaluations  →  get_evaluation_deta
 - `sign()` 是全包唯一写操作（本人签到）。已结束的活动会返回 `code=404 msg=Sign-in Expired` 的业务拒绝——可用于安全验证写路径。
 - `query_current_lesson_for_course` 封装 teachClassId 解析规则（`class_type=="1"` 取 JXBID，否则取 SYXZDM）；`Course` 上的 `class_id/schedule_id/class_type/experiment_type_code` 字段为此而补。
 
+### Ldxt (`ysu_sdk.ldxt`)
+
+劳动教育实践课程管理平台（ldxt.ysu.edu.cn，南京先极科技）。**非 EMAP**：ASP.NET MVC 服务端渲染，无 JSON 信封，数据靠标准库 `html.parser` 抽 HTML 表格（`_table.py`，私有模块）。
+
+- **SSO 三步握手**：`cas.authorize(/About/UnifiedAuthenticationLogin)` 出票种 `.DotNetCasClientAuth` → `POST` 同端点确认（JSON `Success`+`Data.Url`）→ GET 角色落地 URL（通常 `/System/User/LoginRole`）。只 authorize 主页不够——票据消费端点是 UnifiedAuthenticationLogin。
+- 登录页判定用**精确路径相等**（`/System/User/Login`），子串匹配会误杀 `LoginRole`。
+- 表格解析：只收顶层 `<table>`（主表单元格内嵌详情小表，嵌套表内容必须忽略）；`m-badge` 徽标文本单独收集——活动名单元格的「教师选择」是徽标（剥离），而状态列整体就是一个徽标（回退为单元格文本）。
+- 时间区间形如 `2024-09-28 08:00 至 2024-09-28 12:00`，按「至」拆分后走 `_datetime` 归一。
+- 导出端点是旧版 OLE2 `.xls`（magic `d0cf11e0`），不解析、不使用。
+
 ### XGXT (`ysu_sdk.xgxt`)
 
 学工系统（`xgxt.ysu.edu.cn`）「综合测评」应用的只读查询。Scope is deliberately limited to the 综测成绩 tab: evaluation terms, score+ranking, indicator details, radar comparison, year overview, and the academic report popup. 测评公示 / 综测打分 are intentionally not implemented (the latter is a write surface).

@@ -15,7 +15,7 @@ from typing import Any
 
 _ISO_DATE_RE = re.compile(r"^(\d{4})[-./](\d{1,2})[-./](\d{1,2})$")
 _ISO_DATETIME_RE = re.compile(
-    r"^(\d{4})[-./](\d{1,2})[-./](\d{1,2})[T ](\d{1,2}):(\d{2}):(\d{2})$"
+    r"^(\d{4})[-./](\d{1,2})[-./](\d{1,2})[T ](\d{1,2}):(\d{2})(?::(\d{2}))?$"
 )
 
 
@@ -38,5 +38,5 @@ def to_iso_datetime(val: Any) -> str:
     m = _ISO_DATETIME_RE.match(s)
     if m:
         y, mo, d, h, mi, se = m.groups()
-        return f"{y}-{int(mo):02d}-{int(d):02d}T{int(h):02d}:{mi}:{se}"
+        return f"{y}-{int(mo):02d}-{int(d):02d}T{int(h):02d}:{mi}:{se or '00'}"
     return str(val or "")

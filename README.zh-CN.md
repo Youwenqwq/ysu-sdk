@@ -8,6 +8,7 @@
 - `ysu_sdk.jwxt`：基于已认证的 CAS 会话，查询教务系统（`jwxt.ysu.edu.cn`）的成绩、课表、全校班级课表、考试、学生信息、培养方案、学业完成与预警，以及学生评教（含提交答卷）。
 - `ysu_sdk.xgxt`：查询学工系统（`xgxt.ysu.edu.cn`）「综合测评」应用的综测成绩、班级/年级排名、指标明细、雷达对比与学业成绩报告（全部只读）。
 - `ysu_sdk.jwmobile`：移动教务课程签到——当前课程活动、签到详情/状态查询，以及 `sign()` 签到（本包唯一写操作）。
+- `ysu_sdk.ldxt`：劳动教育实践课程管理平台（ASP.NET 服务端渲染）——劳动时长记录、学分汇总、活动报名列表，全部只读。
 
 ## 安装
 
@@ -288,6 +289,24 @@ for course in jwxt.query_courses_on_date():
 `sign()` 是写操作（本人考勤签到），也是本包唯一写操作。
 `query_current_lesson_for_course` 接受任何满足 `CourseLike` 字段的对象
 （jwxt 的 `Course` 即满足）；两个包互不 import。
+
+## 劳动教育（ldxt）用法
+
+```python
+from ysu_sdk.cas import CASClient, CASCredential
+from ysu_sdk.ldxt import LdxtClient
+
+ldxt = LdxtClient(CASClient(credential=CASCredential.load()))
+
+for record in ldxt.query_labor_records():
+    print(record.term, record.name, record.hours, record.status)
+
+summary = ldxt.query_labor_summary()          # 累计时长/总学分
+activities = ldxt.query_enrollable_activities()  # 报名是写操作，未封装
+```
+
+劳动教育系统是 ASP.NET 服务端渲染（无 JSON 信封），SDK 用标准库解析器
+抽取 HTML 表格，零额外依赖。
 
 ## 故障排查：校外网络与 WAF
 

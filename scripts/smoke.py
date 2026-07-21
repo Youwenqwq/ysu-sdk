@@ -218,6 +218,30 @@ def smoke_mobile(cas: CASClient) -> None:
 
 
 # ──────────────────────────────────────────────────────────────────────────── #
+# 劳动教育（ldxt）
+# ──────────────────────────────────────────────────────────────────────────── #
+
+
+def smoke_ldxt(cas: CASClient) -> None:
+    from ysu_sdk.ldxt import LdxtClient
+
+    print("== 劳动教育系统（ldxt） ==")
+    ldxt = LdxtClient(cas)
+
+    records = ldxt.query_labor_records()
+    total = sum(r.hours or 0 for r in records)
+    ok(f"劳动记录: {len(records)} 条, 时长合计={total}h")
+    pace()
+
+    summary = ldxt.query_labor_summary()
+    ok(f"学分汇总: {summary.name} 时长={summary.total_hours}h 学分={summary.total_credits}")
+    pace()
+
+    acts = ldxt.query_enrollable_activities()
+    ok(f"活动报名列表: {len(acts)} 条")
+
+
+# ──────────────────────────────────────────────────────────────────────────── #
 # 全量数据导出
 # ──────────────────────────────────────────────────────────────────────────── #
 
@@ -369,7 +393,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(
         description="ysu-sdk 各模块活网冒烟（请求间隔默认 1s，勿调太低以免触发 WAF）"
     )
-    parser.add_argument("module", choices=["cas", "jwxt", "xgxt", "mobile", "all", "dump"])
+    parser.add_argument("module", choices=["cas", "jwxt", "xgxt", "mobile", "ldxt", "all", "dump"])
     parser.add_argument("--pace", type=float, default=1.0, metavar="SECONDS",
                         help="每组请求之间的间隔秒数（默认 1.0）")
     parser.add_argument("--term", default=None,
@@ -399,6 +423,9 @@ def main() -> int:
             pace()
         if args.module in ("mobile", "all"):
             smoke_mobile(cas)
+            pace()
+        if args.module in ("ldxt", "all"):
+            smoke_ldxt(cas)
             pace()
         if args.module == "dump":
             output = Path(args.output) if args.output else Path(

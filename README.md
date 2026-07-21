@@ -19,6 +19,8 @@ gateway (`cer.ysu.edu.cn`) and educational administration system
   class/grade rankings, indicator details, radar comparison, academic report.
 - `ysu_sdk.jwmobile` — mobile-app course sign-in: current lesson activities,
   sign-in detail/status, and `sign()` (the package's only write operation).
+- `ysu_sdk.ldxt` — labor-education platform (ASP.NET, server-rendered):
+  labor-hour records, credit summary, enrollable activity list. Read-only.
 
 ## Install
 
@@ -311,6 +313,24 @@ for course in jwxt.query_courses_on_date():
 package. `query_current_lesson_for_course` accepts any object with the
 `CourseLike` fields (jwxt's `Course` qualifies); the two packages never
 import each other.
+
+## Labor education (ldxt) usage
+
+```python
+from ysu_sdk.cas import CASClient, CASCredential
+from ysu_sdk.ldxt import LdxtClient
+
+ldxt = LdxtClient(CASClient(credential=CASCredential.load()))
+
+for record in ldxt.query_labor_records():
+    print(record.term, record.name, record.hours, record.status)
+
+summary = ldxt.query_labor_summary()      # total hours / credits
+activities = ldxt.query_enrollable_activities()  # enrollment is a write, not wrapped
+```
+
+The labor system is ASP.NET server-rendered (no JSON envelope); the SDK
+extracts the HTML tables with the stdlib parser — no extra dependencies.
 
 ## Troubleshooting: off-campus networks and the WAF
 
