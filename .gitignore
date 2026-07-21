@@ -27,6 +27,9 @@ venv/
 *.cas.json
 session.pkl
 
+# smoke.py dump 输出（含个人学籍/成绩数据）
+ysu_dump_*.json
+
 # Env
 .env
 .env.*
