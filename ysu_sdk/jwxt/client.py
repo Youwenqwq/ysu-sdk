@@ -1099,6 +1099,11 @@ def _parse_grade(raw: dict[str, Any]) -> Grade:
         special_reason=str(raw.get("TSYYDM_DISPLAY") or ""),
         is_degree_course=_to_bool(raw.get("SFZGKC")),
         project_name=str(raw.get("TYXMDM_DISPLAY") or ""),
+        usual_score=str(raw.get("PSCJ") if raw.get("PSCJ") is not None else ""),
+        midterm_score=str(raw.get("QZCJ") if raw.get("QZCJ") is not None else ""),
+        final_score=str(raw.get("QMCJ") if raw.get("QMCJ") is not None else ""),
+        practice_score=str(raw.get("SJCJ") if raw.get("SJCJ") is not None else ""),
+        exam_time=str(raw.get("KSSJ") or ""),
         raw=raw,
     )
 
@@ -1229,6 +1234,9 @@ def _parse_exam(raw: dict[str, Any]) -> Exam:
         exam_time=str(raw.get("KSSJMS") or raw.get("KSSJ") or ""),
         exam_location=str(raw.get("JASMC") or ""),
         seat_number=str(raw.get("ZWH") or ""),
+        course_code=str(raw.get("KCH") or ""),
+        invigilator=str(raw.get("ZJJSXM") or ""),
+        term=str(raw.get("XNXQDM") or ""),
         raw=raw,
     )
 
@@ -1288,6 +1296,8 @@ def _parse_academic_warning(raw: dict[str, Any]) -> AcademicWarning:
         warning_level=str(raw.get("YJJB") or ""),
         description=str(raw.get("BZ") or ""),
         term=str(raw.get("SCPCMC") or ""),
+        start_date=str(raw.get("YJKSSJ") or ""),
+        end_date=str(raw.get("YJJSSJ") or ""),
         raw=raw,
     )
 

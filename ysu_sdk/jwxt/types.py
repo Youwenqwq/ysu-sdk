@@ -112,6 +112,9 @@ class Exam:
         exam_time: 考试时间描述
         exam_location: 考试地点
         seat_number: 座位号
+        course_code: 课程号（``KCH``）
+        invigilator: 主考/监考教师姓名（``ZJJSXM``）
+        term: 学年学期代码（``XNXQDM``）
     """
 
     name: str
@@ -120,6 +123,9 @@ class Exam:
     exam_time: str = ""
     exam_location: str = ""
     seat_number: str = ""
+    course_code: str = ""
+    invigilator: str = ""
+    term: str = ""
     raw: dict[str, Any] = field(default_factory=dict, repr=False)
 
 
@@ -150,6 +156,11 @@ class Grade:
         special_reason: 特殊原因
         is_degree_course: 是否学位课
         project_name: 项目名称
+        usual_score: 平时成绩（``PSCJ``）
+        midterm_score: 期中成绩（``QZCJ``）
+        final_score: 期末成绩（``QMCJ``）
+        practice_score: 实践成绩（``SJCJ``）
+        exam_time: 考试时间（``KSSJ``）
     """
 
     course_name: str
@@ -174,6 +185,11 @@ class Grade:
     special_reason: str = ""
     is_degree_course: bool = False
     project_name: str = ""
+    usual_score: str = ""
+    midterm_score: str = ""
+    final_score: str = ""
+    practice_score: str = ""
+    exam_time: str = ""
     raw: dict[str, Any] = field(default_factory=dict, repr=False)
 
 
@@ -387,12 +403,16 @@ class AcademicWarning:
         warning_level: 预警级别
         description: 预警描述
         term: 学年学期
+        start_date: 预警开始日期（``YJKSSJ``，YYYY-MM-DD）
+        end_date: 预警结束日期（``YJJSSJ``，YYYY-MM-DD）
     """
 
     warning_type: str
     warning_level: str = ""
     description: str = ""
     term: str = ""
+    start_date: str = ""
+    end_date: str = ""
     raw: dict[str, Any] = field(default_factory=dict, repr=False)
 
 
