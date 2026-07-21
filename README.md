@@ -13,6 +13,9 @@ gateway (`cer.ysu.edu.cn`) and educational administration system
 - `ysu_sdk.jwxt` — read-only queries (grades, schedule, exams, student info,
   training plan, academic completion, warnings) and student evaluation
   (write-once) against the educational administration system.
+- `ysu_sdk.xgxt` — read-only queries against the 综合测评 (comprehensive
+  evaluation) app of the student-affairs system (`xgxt.ysu.edu.cn`): scores,
+  class/grade rankings, indicator details, radar comparison, academic report.
 
 ## Install
 
@@ -244,6 +247,39 @@ the former means the server responded correctly but rejected on business rules;
 the latter means the response itself violated the protocol. Do **not** catch
 `JWXTProtocolError` to handle business errors.
 
+## Student affairs (XGXT) usage
+
+Read-only queries against the 综合测评 (comprehensive evaluation) app of the
+student-affairs system (`xgxt.ysu.edu.cn`). Same auth pattern as JWXT:
+
+```python
+from ysu_sdk.cas import CASClient, CASCredential
+from ysu_sdk.xgxt import XGXTClient
+
+cas = CASClient(credential=CASCredential.load())
+xgxt = XGXTClient(cas)
+
+# Available evaluation terms (latest first)
+terms = xgxt.query_evaluation_terms()
+
+# Score + class/grade ranking (defaults to the latest term)
+result = xgxt.query_evaluation_result()            # or ("2024", "2")
+print(result.total_score, result.class_rank, result.grade_rank)
+
+# Indicator breakdown / radar comparison / year overview
+details = xgxt.query_evaluation_indicators()
+radar = xgxt.query_evaluation_radar()
+statics = xgxt.query_year_score_statics()
+
+# Academic report (the 学业成绩 popup on the same page)
+years = xgxt.query_academic_report_years()
+page = xgxt.query_academic_report()                # defaults to the server's default year
+```
+
+All methods are read-only. `XGXTClient` mirrors `JWXTClient`'s lazy re-auth,
+session snapshots (`XGXTSession`), and exception layering (`XGXTProtocolError`
+/ `XGXTBusinessError` / `NotLoggedInError`).
+
 ## Architecture notes
 
 - `JWXTClient` depends on `CASClient` for authentication. Every public business
@@ -276,3 +312,13 @@ the latter means the response itself violated the protocol. Do **not** catch
   form POST, detects login expiry, decodes the EMAP envelope, and raises
   `JWXTProtocolError` on malformed responses or `JWXTBusinessError` on non-zero
   `code`. Query methods should never call `self.session.post` directly.
+
+- `XGXTClient` follows the same pattern as `JWXTClient` (lazy re-auth, its own
+  session, `session_snapshot()`), but instead of jwxt's per-app `_WEU` refresh,
+  the student-affairs platform requires a one-time **role handshake** after
+  authorize (`getAppConfig` → `setXgCommonAppRole` → `changeAppRole`); module
+  APIs return 404 until it completes. `_ensure_app_role()` runs it on the first
+  business call. Two envelope shapes exist side by side:
+  controller style (`data=<JSON>` request body, payload under `data`) and EMAP
+  list style (plain form body, payload under `datas.<key>.rows`).
+  `_post_controller` / `_post_rows` hide the difference.

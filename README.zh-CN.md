@@ -6,6 +6,7 @@
 
 - `ysu_sdk.cas`：负责 `cer.ysu.edu.cn` 网关上的登录、MFA、凭据持久化以及跨 service 出票。
 - `ysu_sdk.jwxt`：基于已认证的 CAS 会话，查询教务系统（`jwxt.ysu.edu.cn`）的成绩、课表、考试、学生信息、培养方案、学业完成与预警，以及学生评教（含提交答卷）。
+- `ysu_sdk.xgxt`：查询学工系统（`xgxt.ysu.edu.cn`）「综合测评」应用的综测成绩、班级/年级排名、指标明细、雷达对比与学业成绩报告（全部只读）。
 
 ## 安装
 
@@ -227,6 +228,38 @@ except JWXTError:
 预期**。两者都继承自 `JWXTError`，但 `JWXTBusinessError` **不是**
 `JWXTProtocolError` 的子类——不要用 `except JWXTProtocolError` 捕获业务错误。
 
+## 学工系统（XGXT）用法
+
+学工系统「综合测评」应用的只读查询，认证模式与 JWXT 相同：
+
+```python
+from ysu_sdk.cas import CASClient, CASCredential
+from ysu_sdk.xgxt import XGXTClient
+
+cas = CASClient(credential=CASCredential.load())
+xgxt = XGXTClient(cas)
+
+# 可查询的测评学年学期（最新在前）
+terms = xgxt.query_evaluation_terms()
+
+# 综测成绩与班级/年级排名（默认最新测评批次）
+result = xgxt.query_evaluation_result()            # 或 ("2024", "2")
+print(result.total_score, result.class_rank, result.grade_rank)
+
+# 指标得分明细 / 雷达对比 / 各学年分数总览
+details = xgxt.query_evaluation_indicators()
+radar = xgxt.query_evaluation_radar()
+statics = xgxt.query_year_score_statics()
+
+# 学业成绩报告（同页「学业成绩」弹窗）
+years = xgxt.query_academic_report_years()
+page = xgxt.query_academic_report()                # 默认服务端默认学年
+```
+
+所有方法均为只读。`XGXTClient` 与 `JWXTClient` 模式一致：懒回退重认证、
+会话快照（`XGXTSession`）、异常分层（`XGXTProtocolError` /
+`XGXTBusinessError` / `NotLoggedInError`）。
+
 ## 架构说明
 
 - `JWXTClient` 依赖 `CASClient` 完成认证。所有公开业务方法都带有「懒回退」
@@ -243,3 +276,11 @@ except JWXTError:
   `JWXTClient` 内部已封装。
 - 每个查询方法在调用前会按需调用 `_ensure_weu(APP_ID)`，刷新该应用的 `_WEU`
   令牌，避免跨应用调用时 cookie 错位。
+- `XGXTClient` 与 `JWXTClient` 模式相同（懒回退、独立 session、
+  `session_snapshot()`），但与 jwxt 的按应用 `_WEU` 刷新不同，学工平台要求
+  在 authorize 之后做一次**角色握手**（`getAppConfig` → `setXgCommonAppRole`
+  → `changeAppRole`）；未完成握手前模块 API 一律返回 404。该握手由
+  `_ensure_app_role()` 在首次业务调用时自动完成。接口存在两种报文形态并存：
+  controller 风格（请求体为 `data=<JSON>`，响应载荷在 `data` 字段）与 EMAP
+  列表风格（纯 form 表单，响应载荷在 `datas.<key>.rows`），分别由
+  `_post_controller` / `_post_rows` 收口。

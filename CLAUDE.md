@@ -8,6 +8,7 @@ A Python SDK for Yanshan University's unified identity authentication (CAS) gate
 
 - `ysu_sdk.cas`: CAS login, MFA, credential persistence, and cross-`service` Service-Ticket issuance.
 - `ysu_sdk.jwxt`: Information queries for the educational administration system — grades, grade statistics/distribution/ranking (per teaching class or whole course), GPA stats, schedule (theory & experimental), exams, student info, training plan, academic completion, academic warnings, and student evaluation. **`submit_evaluation` is the sole write operation in this package** — every other public method is read-only. Don't add other write surfaces (course selection, applications) without an explicit ask; this SDK is intentionally narrow.
+- `ysu_sdk.xgxt`: Read-only queries for the student-affairs system's 综合测评 app — evaluation terms, scores with class/grade rankings, indicator details, radar comparison, year score overview, and academic report.
 
 The README is in Simplified Chinese; user-facing docstrings and exception messages should match.
 
@@ -144,6 +145,23 @@ query_evaluation_types  →  query_pending_evaluations  →  get_evaluation_deta
 #### Constants layout
 
 `constants.py` groups `APP_IDS` and `API_PATHS` by feature with `# —— … ——` headers (成绩查询 / 课表 / 学籍 / 考试 / 学生评教). Entries marked `（未使用）` are kept as references for future work but not wired through `JWXTClient`. When adding a new endpoint, place it under the matching header and add a one-line Chinese comment describing the API.
+
+### XGXT (`ysu_sdk.xgxt`)
+
+学工系统（`xgxt.ysu.edu.cn`）「综合测评」应用的只读查询。Scope is deliberately limited to the 综测成绩 tab: evaluation terms, score+ranking, indicator details, radar comparison, year overview, and the academic report popup. 测评公示 / 综测打分 are intentionally not implemented (the latter is a write surface).
+
+#### Differences from JWXT
+
+- **Role handshake instead of `_WEU` per-app gating.** Module APIs 404 until the session binds an app role (e.g. 「学生组」). `_ensure_app_role()` replicates the frontend's handshake once per client instance: `getAppConfig.do` (appId `5275772372599202`) → pick the `active` entry in `HEADER.dropMenu` → `setXgCommonAppRole.do` + `changeAppRole/<app>/<roleId>.do`. These three endpoints do NOT use the `code` envelope (raw config JSON / `returnCode` / `success`), so they go through `_raw_post`, not `_post`. The flag resets in `_reauthorize`.
+- **Two envelope shapes side by side.** Controller style (`evaluationApplyController` / `evaluationBjhpController`): request body is `data=<JSON>`, response payload under `data` — handled by `_post_controller`. EMAP list style (`tjsqhqxqzbxx`, `xycjbg`): plain form params, payload under `datas.<key>.rows` — handled by `_post_rows`. Both are keyed on `code == "0"` and share `_post` as the choke point (same expiry detection and exception layering as jwxt).
+- **Term model.** `CPXN` (e.g. `"2025"` = 2025-2026学年) + `CPXQ` (`"1"`/`"2"`) come in pairs from `getCpxnxq.do` (`XNXX` list, newest first). `_resolve_term(None, None)` defaults to the newest pair.
+- Lazy re-auth decorator and `XGXTSession` mirror the jwxt pattern one-for-one.
+
+### WAF / live-testing notes (learned 2026-07)
+
+`cer` / `xgxt` / `ehall` / `res` subdomains sit behind a WAF that issues `nS_*` cookies (`jwxt` is notably NOT behind it). From off-campus IPs, bursts of non-browser traffic (python-requests/curl) get connections RST'd after the TLS handshake and escalate to a **full IP block** within minutes — the block then affects browsers too. When probing live endpoints: keep volume low, sequential, browser-paced; prefer capturing traffic from a real browser session.
+
+Related design point: `CASClient.is_authenticated()` raises `CASNetworkError` on transport failure (connection refused, timeout, WAF reset) instead of returning `False`, so a WAF-blocked/unreachable gateway is never confused with an expired TGC. Callers using it as a health signal should catch `CASNetworkError` separately.
 
 ## Conventions
 
