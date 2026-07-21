@@ -124,7 +124,8 @@ In schedule rows (`cxxszhxqkb`, `querybjkb`) `SKZC` is a 0/1 **bitmap** (char N 
 
 - `/jwapp/code/*.do` dictionary endpoints validate the **`Referer` header**: missing → `code=404` *business envelope* (HTTP 200, not HTTP 404). Diagnosed by cookie-swap: the browser's own cookies replayed through `requests` still 404'd until `Referer` was added. `_emap_post`/`_post` take `referer=`; kcbcx methods pass `KCBCX_INDEX_URL`.
 - Code tables return the standard `code` envelope. 专业 cascade is **client-side** (`otherFields.YXDM`); 班级 discovery is `bjcx.do` with server-side filters (`NJ/YXDM/ZYDM/SFYPK` as direct form params).
-- `querybjkb` / `querybjkbtk` / `querybjkbwpk` are `requestParamStr` style and share `_query_bjkb`.
+- `querybjkb` / `querybjkbtk` / `querybjkbwpk` / `queryjaskb` / `queryjaskbtk` are `requestParamStr` style and share `_query_bjkb` (`id_param` switches between `BJDM` and `JASDM`).
+- 教室列表 `jscx.do` uses **`querySetting` JSON filters** (fuzzy `include` for `JASMC`, `equal` for the rest) while `XNXQDM` stays a direct form param.
 - `API_PATHS` entries starting with `/` are site-absolute and bypass `JWXT_APP_BASE` in `_build_api_url`.
 
 #### Grade statistics/distribution/ranking — `JXBID` vs `KCH` dispatch

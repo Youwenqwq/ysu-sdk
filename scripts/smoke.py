@@ -275,6 +275,13 @@ def smoke_dump(cas: CASClient, term: str | None, output: Path, *, include_raw: b
                 lambda: jwxt.query_class_schedule(first_class.class_id, term=term))
         collect("jwxt", "class_unscheduled_sample",
                 lambda: jwxt.query_class_unscheduled_courses(first_class.class_id, term=term))
+    collect("jwxt", "campuses", jwxt.query_campuses)
+    collect("jwxt", "teaching_buildings", lambda: jwxt.query_teaching_buildings())
+    classrooms = collect("jwxt", "classrooms", lambda: jwxt.query_classrooms(term=term, scheduled=True))
+    if classrooms:
+        first_room = classrooms[0]
+        collect("jwxt", "classroom_schedule_sample",
+                lambda: jwxt.query_classroom_schedule(first_room.code, term=term))
 
     # 成绩统计/分布/排名：以第一门成绩为样本，两种口径各调一次
     if grades:

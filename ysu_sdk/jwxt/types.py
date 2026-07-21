@@ -185,6 +185,38 @@ class ClassInfo:
 
 
 @dataclass(frozen=True, slots=True)
+class ClassroomInfo:
+    """全校教室列表条目（对应 ``jscx``）。
+
+    Attributes:
+        name: 教室名称（``JASMC``）
+        code: 教室代码（``JASDM``，课表查询的主键）
+        campus: 校区代码（``XXXQDM``）
+        campus_display: 校区名称
+        building: 教学楼代码（``JXLDM``）
+        building_display: 教学楼名称
+        exam_seats: 考试座位数（``KSZWS``）
+        class_seats: 上课座位数（``SKZWS``）
+        type_display: 教室类型（``JASLXDM_DISPLAY``，如多媒体教室）
+        floor: 楼层（``LC``）
+        is_scheduled: 是否已排课（``SFYPK``）
+    """
+
+    name: str = ""
+    code: str = ""
+    campus: str = ""
+    campus_display: str = ""
+    building: str = ""
+    building_display: str = ""
+    exam_seats: int = 0
+    class_seats: int = 0
+    type_display: str = ""
+    floor: int = 0
+    is_scheduled: bool = False
+    raw: dict[str, Any] = field(default_factory=dict, repr=False)
+
+
+@dataclass(frozen=True, slots=True)
 class ClassPeriod:
     """课表节次配置。
 

@@ -27,6 +27,7 @@ from ysu_sdk.jwxt.types import (
     AcademicWarning,
     ClassInfo,
     ClassPeriod,
+    ClassroomInfo,
     CodeItem,
     Course,
     CourseAdjustment,
@@ -966,20 +967,23 @@ class JWXTClient:
         *,
         path_key: str,
         row_key: str,
-        class_id: str,
+        id_param: str,
+        id_value: str,
         term: str | None,
         week: int | None,
         parser: Callable[[dict[str, Any]], Any],
     ) -> list[Any]:
-        """班级课表系列接口的共用实现（``querybjkb`` / ``querybjkbtk`` / ``querybjkbwpk``）。
+        """班级/教室课表系列接口的共用实现。
 
-        三者均为 ``requestParamStr`` 风格，请求体 ``XNXQDM/BJDM(/SKZC)``。
+        覆盖 ``querybjkb`` / ``querybjkbtk`` / ``querybjkbwpk`` / ``queryjaskb``
+        / ``queryjaskbtk``：均为 ``requestParamStr`` 风格，请求体
+        ``XNXQDM/<id_param>(/SKZC)``。
         """
         if term is None:
             term = self._get_current_term(APP_IDS["studentWdksapApp"], "wdksap_dqxnxq")
         self._ensure_weu(APP_IDS["kcbcx"])
 
-        payload: dict[str, Any] = {"XNXQDM": term, "BJDM": class_id}
+        payload: dict[str, Any] = {"XNXQDM": term, id_param: id_value}
         if week is not None:
             payload["SKZC"] = week
         datas = self._post(
@@ -1008,7 +1012,8 @@ class JWXTClient:
         return self._query_bjkb(
             path_key="kcbcx",
             row_key="querybjkb",
-            class_id=class_id,
+            id_param="BJDM",
+            id_value=class_id,
             term=term,
             week=None,
             parser=_parse_course,
@@ -1030,7 +1035,8 @@ class JWXTClient:
         return self._query_bjkb(
             path_key="kcbcx_tk",
             row_key="querybjkbtk",
-            class_id=class_id,
+            id_param="BJDM",
+            id_value=class_id,
             term=term,
             week=week,
             parser=_parse_course_adjustment,
@@ -1048,10 +1054,137 @@ class JWXTClient:
         return self._query_bjkb(
             path_key="kcbcx_wpk",
             row_key="querybjkbwpk",
-            class_id=class_id,
+            id_param="BJDM",
+            id_value=class_id,
             term=term,
             week=week,
             parser=_parse_unscheduled_course,
+        )
+
+    # ── 教室课表（jskcb） ──
+
+    @_with_lazy_reauth
+    def query_campuses(self) -> list[CodeItem]:
+        """查询校区代码表。"""
+        self._ensure_weu(APP_IDS["kcbcx"])
+        datas = self._post(API_PATHS["code_xxxq"], referer=KCBCX_INDEX_URL)
+        return [_parse_code_item(r) for r in _extract_rows(datas, "code")]
+
+    @_with_lazy_reauth
+    def query_teaching_buildings(self, campus: str | None = None) -> list[CodeItem]:
+        """查询教学楼代码表。
+
+        Args:
+            campus: 校区代码（``XXXQDM``）；为 ``None`` 则返回全部教学楼。
+                代码表行 ``otherFields.XXXQDM`` 存在时按它过滤，否则原样返回。
+        """
+        self._ensure_weu(APP_IDS["kcbcx"])
+        datas = self._post(API_PATHS["code_jxldm"], referer=KCBCX_INDEX_URL)
+        items = [_parse_code_item(r) for r in _extract_rows(datas, "code")]
+        if campus is not None:
+            items = [
+                i
+                for i in items
+                if str((i.raw.get("otherFields") or {}).get("XXXQDM") or "") == str(campus)
+            ]
+        return items
+
+    @_with_lazy_reauth
+    def query_classrooms(
+        self,
+        *,
+        term: str | None = None,
+        name: str | None = None,
+        campus: str | None = None,
+        building: str | None = None,
+        scheduled: bool | None = None,
+        page_size: int = 500,
+        page_number: int = 1,
+    ) -> list[ClassroomInfo]:
+        """查询全校教室列表（对应 ``jscx``）。
+
+        Args:
+            term: 学年学期；为 ``None`` 则查询当前学期。
+            name: 教室名称关键字（模糊匹配，``JASMC``）。
+            campus: 校区代码（``XXXQDM``），见 :meth:`query_campuses`。
+            building: 教学楼代码（``JXLDM``），见 :meth:`query_teaching_buildings`。
+            scheduled: 是否已排课；为 ``None`` 则不过滤。
+            page_size: 每页条数。
+            page_number: 页码（从 1 开始）。
+
+        Returns:
+            教室列表（含座位数、教室类型等）。
+        """
+        if term is None:
+            term = self._get_current_term(APP_IDS["studentWdksapApp"], "wdksap_dqxnxq")
+        self._ensure_weu(APP_IDS["kcbcx"])
+
+        query: list[dict[str, str]] = []
+        if name:
+            query.append({"name": "JASMC", "builder": "include", "linkOpt": "AND", "value": name})
+        if campus is not None:
+            query.append({"name": "XXXQDM", "builder": "equal", "linkOpt": "AND", "value": str(campus)})
+        if building is not None:
+            query.append({"name": "JXLDM", "builder": "equal", "linkOpt": "AND", "value": str(building)})
+        if scheduled is not None:
+            query.append({"name": "SFYPK", "builder": "equal", "linkOpt": "AND", "value": "1" if scheduled else "0"})
+
+        form = {
+            "XNXQDM": term,
+            "*order": "+JXLDM,+JASMC",
+            "pageSize": str(page_size),
+            "pageNumber": str(page_number),
+        }
+        if query:
+            form["querySetting"] = json.dumps(query, ensure_ascii=False)
+        datas = self._post(API_PATHS["jscx"], form, referer=KCBCX_INDEX_URL)
+        return [_parse_classroom_info(r) for r in _extract_rows(datas, "jscx")]
+
+    @_with_lazy_reauth
+    def query_classroom_schedule(
+        self,
+        classroom_code: str,
+        *,
+        term: str | None = None,
+        week: int | None = None,
+    ) -> list[Course]:
+        """查询指定教室的课表（对应 ``queryjaskb``）。
+
+        Args:
+            classroom_code: 教室代码（``JASDM``），见 :meth:`query_classrooms`。
+            term: 学年学期；为 ``None`` 则查询当前学期。
+            week: 教学周次（``SKZC``）；为 ``None`` 则返回整学期。
+
+        Returns:
+            占用该教室的课程列表。
+        """
+        return self._query_bjkb(
+            path_key="jaskb",
+            row_key="queryjaskb",
+            id_param="JASDM",
+            id_value=classroom_code,
+            term=term,
+            week=week,
+            parser=_parse_course,
+        )
+
+    @_with_lazy_reauth
+    def query_classroom_adjusted_courses(
+        self,
+        classroom_code: str,
+        *,
+        term: str | None = None,
+        week: int | None = None,
+    ) -> list[CourseAdjustment]:
+        """查询指定教室的调课记录（对应 ``queryjaskbtk``）。"""
+        return self._query_bjkb(
+            path_key="jaskb_tk",
+            row_key="queryjaskbtk",
+            id_param="JASDM",
+            id_value=classroom_code,
+            term=term,
+            week=week,
+            parser=_parse_course_adjustment,
         )
 
     # ──────────────────────────────────────────────────────────────────── #
@@ -1584,6 +1717,23 @@ def _parse_class_info(raw: dict[str, Any]) -> ClassInfo:
         is_scheduled=_to_bool(raw.get("SFYPK")),
         student_count=int(raw.get("SJRS") or 0),
         initial_count=int(raw.get("CSRS") or 0),
+        raw=raw,
+    )
+
+
+def _parse_classroom_info(raw: dict[str, Any]) -> ClassroomInfo:
+    return ClassroomInfo(
+        name=str(raw.get("JASMC") or ""),
+        code=str(raw.get("JASDM") or ""),
+        campus=str(raw.get("XXXQDM") or ""),
+        campus_display=str(raw.get("XXXQDM_DISPLAY") or ""),
+        building=str(raw.get("JXLDM") or ""),
+        building_display=str(raw.get("JXLDM_DISPLAY") or ""),
+        exam_seats=int(raw.get("KSZWS") or 0),
+        class_seats=int(raw.get("SKZWS") or 0),
+        type_display=str(raw.get("JASLXDM_DISPLAY") or ""),
+        floor=int(raw.get("LC") or 0),
+        is_scheduled=_to_bool(raw.get("SFYPK")),
         raw=raw,
     )
 

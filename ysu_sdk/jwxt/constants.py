@@ -45,11 +45,16 @@ API_PATHS = {
     "kcbcx_tk": "kcbcx/KbcxController/querybjkbtk.do",                           # 班级课表调课记录
     "kcbcx_wpk": "kcbcx/KbcxController/querybjkbwpk.do",                          # 班级课表未排课
     "bjcx": "kcbcx/modules/bjkcb/bjcx.do",                                        # 班级列表（级联筛选：年级/院系/专业）
+    "jscx": "kcbcx/modules/jskcb/jscx.do",                                        # 教室列表（querySetting 风格筛选）
+    "jaskb": "kcbcx/KbcxController/queryjaskb.do",                                # 教室课表
+    "jaskb_tk": "kcbcx/KbcxController/queryjaskbtk.do",                           # 教室课表调课记录
 
     # —— 代码表（级联筛选的字典数据源；绝对路径，不随 JWXT_APP_BASE 拼接） ——
     "code_nj": "/jwapp/code/c1e19f4d-94e0-464f-bb7b-d70d0517150c.do",            # 年级
     "code_yxdm": "/jwapp/code/49a86828-aef9-4a48-b26f-01149dac72d7.do",          # 院系
     "code_zydm": "/jwapp/code/87a9226a-6e44-44cc-9743-c081a8f9cb9b.do",          # 专业（otherFields.YXDM 为父级院系）
+    "code_xxxq": "/jwapp/code/83a986fc-e677-400e-99a4-c7bb39c2ca35.do",          # 校区
+    "code_jxldm": "/jwapp/code/82101c45-a7d3-414d-988b-24744db9f5ea.do",         # 教学楼
 
     # —— 学籍 / 培养方案 / 学业 ——
     "xsjbxx": "xsjbxxgl/modules/xsjbxx/cxxsjbxxlb.do",                           # 学生基本信息
