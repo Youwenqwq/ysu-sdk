@@ -281,6 +281,57 @@ All methods are read-only. `XGXTClient` mirrors `JWXTClient`'s lazy re-auth,
 session snapshots (`XGXTSession`), and exception layering (`XGXTProtocolError`
 / `XGXTBusinessError` / `NotLoggedInError`).
 
+## Troubleshooting: off-campus networks and the WAF
+
+All `*.ysu.edu.cn` gateways sit behind a security WAF. Under **bursts of
+non-browser traffic from one IP** it escalates in two stages:
+
+1. **Progressive tarpit** — responses are delayed in quantized steps
+   (30 s → 40 s → 50 s). The delay pool is fingerprint-selective:
+   browsers and curl/libcurl pass at full speed while
+   python-requests/urllib3 is delayed. Retrying with the flagged
+   fingerprint feeds the escalation.
+2. **Full IP block** — every client from the IP is refused, browsers
+   included. A new IP (or cooldown) restores access.
+
+Rules of thumb:
+
+- Pace your calls (`scripts/smoke.py --pace` defaults to 1 s) and avoid
+  parallel bursts against these hosts.
+- If requests suddenly take tens of seconds, **stop** — don't retry
+  through it; wait for cooldown or change IP.
+- As a recovery transport you can inject a `curl_cffi` session (its TLS
+  fingerprint is not in the delay pool) — the client constructors accept
+  any duck-typed session:
+
+```python
+from curl_cffi import requests as creq
+
+class CookiesAdapter:
+    def __init__(self, jar): self._jar = jar
+    def set_cookie(self, c):
+        self._jar.set(c.name, c.value, domain=c.domain,
+                      path=c.path, secure=bool(c.secure))
+    def clear(self, domain=None, path=None, name=None):
+        if domain is None:
+            self._jar.clear(); return
+        for c in list(self):
+            if domain in (c.domain or ""):
+                self._jar.clear(domain=c.domain, path=c.path, name=c.name)
+    def __iter__(self):
+        yield from self._jar.jar
+
+class SessionAdapter:
+    def __init__(self, inner): self._inner = inner
+    @property
+    def cookies(self): return CookiesAdapter(self._inner.cookies)
+    def get(self, url, **kw): return self._inner.get(url, **kw)
+    def post(self, url, data=None, **kw): return self._inner.post(url, data=data, **kw)
+
+session = SessionAdapter(creq.Session(impersonate="chrome", timeout=30))
+jwxt = JWXTClient(cas, session=session)
+```
+
 ## Architecture notes
 
 - `JWXTClient` depends on `CASClient` for authentication. Every public business

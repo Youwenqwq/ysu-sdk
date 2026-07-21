@@ -260,6 +260,47 @@ page = xgxt.query_academic_report()                # 默认服务端默认学年
 会话快照（`XGXTSession`）、异常分层（`XGXTProtocolError` /
 `XGXTBusinessError` / `NotLoggedInError`）。
 
+## 故障排查：校外网络与 WAF
+
+所有 `*.ysu.edu.cn` 网关都在同一道安全 WAF 之后。当同一 IP 的**非浏览器流量突发**时，它会分两级升级：
+
+1. **渐进限速（tarpit）**——响应被量化延迟（30s → 40s → 50s）。延迟池按 TLS 指纹区分：浏览器和 curl/libcurl 全速通过，python-requests/urllib3 被拖慢。用被标记的指纹重试只会加码。
+2. **全 IP 封锁**——该 IP 的所有客户端（含浏览器）都被拒绝。换 IP（或等待冷却）后恢复。
+
+使用建议：
+
+- 控制请求节奏（`scripts/smoke.py --pace` 默认 1s），避免对网关并发突发。
+- 如果请求突然变成几十秒才返回，**立即停手**——不要顶着限速重试，等冷却或换 IP。
+- 作为恢复手段，可以注入 `curl_cffi` session（其 TLS 指纹不在延迟池内）——客户端构造函数接受任何 duck-typed session：
+
+```python
+from curl_cffi import requests as creq
+
+class CookiesAdapter:
+    def __init__(self, jar): self._jar = jar
+    def set_cookie(self, c):
+        self._jar.set(c.name, c.value, domain=c.domain,
+                      path=c.path, secure=bool(c.secure))
+    def clear(self, domain=None, path=None, name=None):
+        if domain is None:
+            self._jar.clear(); return
+        for c in list(self):
+            if domain in (c.domain or ""):
+                self._jar.clear(domain=c.domain, path=c.path, name=c.name)
+    def __iter__(self):
+        yield from self._jar.jar
+
+class SessionAdapter:
+    def __init__(self, inner): self._inner = inner
+    @property
+    def cookies(self): return CookiesAdapter(self._inner.cookies)
+    def get(self, url, **kw): return self._inner.get(url, **kw)
+    def post(self, url, data=None, **kw): return self._inner.post(url, data=data, **kw)
+
+session = SessionAdapter(creq.Session(impersonate="chrome", timeout=30))
+jwxt = JWXTClient(cas, session=session)
+```
+
 ## 架构说明
 
 - `JWXTClient` 依赖 `CASClient` 完成认证。所有公开业务方法都带有「懒回退」
