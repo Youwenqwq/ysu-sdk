@@ -10,6 +10,7 @@ from ysu_sdk.jwxt.exceptions import (
 from ysu_sdk.jwxt.session import JWXTSession
 from ysu_sdk.jwxt.types import (
     AcademicCompletion,
+    AcademicCompletionGroup,
     AcademicWarning,
     ClassInfo,
     ClassPeriod,
@@ -48,6 +49,7 @@ __all__ = [
     "JWXTProtocolError",
     "JWXTBusinessError",
     "AcademicCompletion",
+    "AcademicCompletionGroup",
     "AcademicWarning",
     "ClassInfo",
     "ClassPeriod",

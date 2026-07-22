@@ -692,6 +692,32 @@ class AcademicCompletion:
 
 
 @dataclass(frozen=True, slots=True)
+class AcademicCompletionGroup:
+    """学业完成课组明细（「查看详情」中的一行）。
+
+    Attributes:
+        group_name: 课组名称（如“公共必选课”）
+        group_code: 课组号（``KZH``）
+        group_type: 课组类型代码（``KZLXDM``）
+        course_nature: 课程性质（必修/选修）
+        required_credits: 要求学分
+        completed_credits: 完成学分
+        completed_courses: 完成门数
+        passed: 该课组是否通过
+    """
+
+    group_name: str = ""
+    group_code: str = ""
+    group_type: str = ""
+    course_nature: str = ""
+    required_credits: str = ""
+    completed_credits: str = ""
+    completed_courses: int = 0
+    passed: bool = False
+    raw: dict[str, Any] = field(default_factory=dict, repr=False)
+
+
+@dataclass(frozen=True, slots=True)
 class EvaluationType:
     """评教类型信息。
 

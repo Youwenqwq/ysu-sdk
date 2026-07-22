@@ -86,6 +86,7 @@ info = jwxt.query_student_info()               # student profile
 plan = jwxt.query_training_plan()              # training plan
 completion = jwxt.query_academic_completion()  # academic completion
 completed_at = jwxt.query_academic_completion_time()  # completion data last-calculated time
+groups = jwxt.query_academic_completion_detail()   # per-course-group completion detail
 completion = jwxt.recalculate_academic_completion()  # request recalculation (write)
 warnings = jwxt.query_academic_warnings()      # academic warnings
 

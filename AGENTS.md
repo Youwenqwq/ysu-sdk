@@ -139,6 +139,7 @@ In schedule rows (`cxxszhxqkb`, `querybjkb`) `SKZC` is a 0/1 **bitmap** (char N 
 #### 学业完成（xywccx）—— 重算与计算时间
 
 - 完成记录行（`cxxsscfa`，按 `-CZSJ` 倒序取首行）的 `CZSJ` 即页面显示的「本数据上次计算时间」，解析为 `AcademicCompletion.last_calculated_at`（RFC3339）；`query_academic_completion_time()` 是其便捷封装。
+- 「查看详情」= `cxscfakz.do`（课组明细，`XH/PYFADM/BYNJDM/SCLBDM` 取自完成记录行；`XNXQDM` 前端会带但实测非必需，SDK 不传）。返回每课组一行：`KZM/KZH/KZLXDM/KCXZDM_DISPLAY/YQXF/WCXF/WCMS/SFTG`。同页面的 `cxfakzyxxfgj.do`（每课组一次、只回 `XKXF`）信息量为零，有意不接。
 - 重算是**两段式写路径**：`bysc.do`（`PYFADM/BYNJDM/SCLBDM` 均取自完成记录行）触发计算，envelope 的 `datas.bysc.code==0` 才算受理（注意 `datas.bysc` 是对象不是 rows）；随后以前端同款 `byscjd.do`（`ZXJDKEY=BYSC_<XH>`）轮询进度，行内 `YWCS>=ZS` 为完成。`recalculate_academic_completion(wait=True)` 完成后会重新查询返回最新结果。
 
 #### Grade statistics/distribution/ranking — `JXBID` vs `KCH` dispatch

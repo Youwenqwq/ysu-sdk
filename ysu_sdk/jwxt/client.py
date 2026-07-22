@@ -27,6 +27,7 @@ from ysu_sdk.jwxt.exceptions import JWXTBusinessError, JWXTProtocolError, NotLog
 from ysu_sdk.jwxt.session import JWXTSession
 from ysu_sdk.jwxt.types import (
     AcademicCompletion,
+    AcademicCompletionGroup,
     AcademicWarning,
     ClassInfo,
     ClassPeriod,
@@ -1460,6 +1461,25 @@ class JWXTClient:
         return self.query_academic_completion().last_calculated_at
 
     @_with_lazy_reauth
+    def query_academic_completion_detail(self) -> list[AcademicCompletionGroup]:
+        """查询学业完成课组明细（对应页面的「查看详情」）。
+
+        Returns:
+            课组完成情况列表，每个课组一行（要求/完成学分、完成门数、是否通过）。
+        """
+        self._ensure_weu(APP_IDS["xywccx"])
+
+        row = self._query_completion_row()
+        datas = self._post(API_PATHS["xywc_detail"], {
+            "XH": str(row.get("XH") or ""),
+            "PYFADM": str(row.get("PYFADM") or ""),
+            "BYNJDM": str(row.get("BYNJDM") or "-"),
+            "SCLBDM": str(row.get("SCLBDM") or "04"),
+        })
+        rows = _extract_rows(datas, "cxscfakz")
+        return [_parse_completion_group(r) for r in rows]
+
+    @_with_lazy_reauth
     def recalculate_academic_completion(
         self,
         *,
@@ -2113,6 +2133,20 @@ def _parse_academic_completion(raw: dict[str, Any]) -> AcademicCompletion:
         elective=str(raw.get("XKXF") or ""),
         passed=_to_bool(raw.get("JSSFTG")),
         last_calculated_at=to_iso_datetime(raw.get("CZSJ")),
+        raw=raw,
+    )
+
+
+def _parse_completion_group(raw: dict[str, Any]) -> AcademicCompletionGroup:
+    return AcademicCompletionGroup(
+        group_name=str(raw.get("KZM") or ""),
+        group_code=str(raw.get("KZH") or ""),
+        group_type=str(raw.get("KZLXDM") or ""),
+        course_nature=str(raw.get("KCXZDM_DISPLAY") or ""),
+        required_credits=str(raw.get("YQXF") or ""),
+        completed_credits=str(raw.get("WCXF") or ""),
+        completed_courses=int(raw.get("WCMS") or 0),
+        passed=_to_bool(raw.get("SFTG")),
         raw=raw,
     )
 
