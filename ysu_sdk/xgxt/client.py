@@ -119,7 +119,6 @@ def _parse_indicator_detail(r: dict[str, Any]) -> EvaluationIndicatorDetail:
     return EvaluationIndicatorDetail(
         name=_to_str(r.get("ZBMC")),
         score=_to_str(r.get("FS")),
-        rank=_to_int(r.get("PX")),
         max_score=_to_str(r.get("ZDZ")),
         range_text=_to_str(r.get("FZFW")),
         proportion=_to_str(r.get("BL")),

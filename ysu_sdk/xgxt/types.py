@@ -87,7 +87,6 @@ class EvaluationIndicatorDetail:
     Attributes:
         name: 指标名称（``ZBMC``）
         score: 得分（``FS``）
-        rank: 排名（``PX``）
         max_score: 分值上限（``ZDZ``）
         range_text: 分值范围描述（``FZFW``，如 ``"分值：0-30.00"``）
         proportion: 占比百分比（``BL``）
@@ -97,7 +96,6 @@ class EvaluationIndicatorDetail:
 
     name: str = ""
     score: str = ""
-    rank: int = 0
     max_score: str = ""
     range_text: str = ""
     proportion: str = ""
