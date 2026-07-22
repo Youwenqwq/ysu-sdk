@@ -903,7 +903,7 @@ class JWXTClient:
         ]
 
     # ──────────────────────────────────────────────────────────────────── #
-    # 补考办理（只读）
+    # 补考办理
     # ──────────────────────────────────────────────────────────────────── #
 
     def _get_makeup_term(self) -> str:
@@ -987,6 +987,48 @@ class JWXTClient:
         })
         rows = _extract_rows(datas, "cxbkbmmx")
         return [_parse_makeup_course(r) for r in rows]
+
+    @_with_lazy_reauth
+    def signup_makeup_exam(
+        self,
+        *,
+        task_id: str,
+        batch_id: str,
+        student_id: str | None = None,
+    ) -> None:
+        """报名补考（对应 ``xgksrwxs``，写操作）。
+
+        ``task_id`` 与 ``batch_id`` 取自 :meth:`query_makeup_exam_courses`
+        返回的 :class:`MakeupExamCourse` 同名字段。
+
+        Args:
+            task_id: 考试任务 ID（``KSRWID``）。
+            batch_id: 批次代码（``KSDM``）。
+            student_id: 学号；为 ``None`` 则自动查询当前登录学生信息。
+
+        Raises:
+            JWXTBusinessError: 服务端业务拒绝（如不在报名时间范围内）。注意本接口
+                外层信封恒为 ``code=0``，真实结果在 ``datas.xgksrwxs.extParams``：
+                ``code == "1"`` 为成功，其余为拒绝（``msg`` 含原因）。
+            JWXTProtocolError: 响应格式异常。
+        """
+        if student_id is None:
+            student_id = self.query_student_info().student_id
+        self._ensure_weu(APP_IDS["bkbl"])
+
+        param = json.dumps(
+            [{"XH": student_id, "KSRWID": task_id, "KSBMZTDM": "02", "KSDM": batch_id}],
+            ensure_ascii=False,
+        )
+        url = _build_api_url(API_PATHS["xgksrwxs"])
+        datas = self._post(API_PATHS["xgksrwxs"], {"param": param})
+
+        node = datas.get("xgksrwxs")
+        if not isinstance(node, dict) or not isinstance(node.get("extParams"), dict):
+            raise JWXTProtocolError(f"missing xgksrwxs.extParams in response from {url}")
+        ext = node["extParams"]
+        if str(ext.get("code")) != "1":
+            raise JWXTBusinessError(ext.get("code"), ext.get("msg"), url)
 
     # ──────────────────────────────────────────────────────────────────── #
     # 全校课表（kcbcx）

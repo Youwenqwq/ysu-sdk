@@ -7,7 +7,7 @@ This file provides guidance to AI coding agents when working with code in this r
 A Python SDK for Yanshan University's unified identity authentication (CAS) gateway at `cer.ysu.edu.cn` and the educational administration system (教务系统, `jwxt.ysu.edu.cn`).
 
 - `ysu_sdk.cas`: CAS login, MFA, credential persistence, and cross-`service` Service-Ticket issuance.
-- `ysu_sdk.jwxt`: Information queries for the educational administration system — grades, grade statistics/distribution/ranking (per teaching class or whole course), GPA stats, schedule (theory & experimental), unscheduled/adjusted courses, courses-on-date, exams, student info, training plan, academic completion, academic warnings, and student evaluation. **`submit_evaluation` is the sole write operation in this package** — every other public method is read-only. Don't add other write surfaces (course selection, applications) without an explicit ask; this SDK is intentionally narrow.
+- `ysu_sdk.jwxt`: Information queries for the educational administration system — grades, grade statistics/distribution/ranking (per teaching class or whole course), GPA stats, schedule (theory & experimental), unscheduled/adjusted courses, courses-on-date, exams, student info, training plan, academic completion, academic warnings, and student evaluation. **写操作仅有两个**：`submit_evaluation`（评教提交）与 `signup_makeup_exam`（补考报名）——其余公开方法均为只读。 Don't add other write surfaces (course selection, applications) without an explicit ask; this SDK is intentionally narrow.
 - `ysu_sdk.xgxt`: Read-only queries for the student-affairs system's 综合测评 app — evaluation terms, scores with class/grade rankings, indicator details, radar comparison, year score overview, and academic report.
 
 The README is in Simplified Chinese; user-facing docstrings and exception messages should match.
@@ -120,12 +120,13 @@ Module-level helpers reduce parsing duplication:
 
 In schedule rows (`cxxszhxqkb`, `querybjkb`) `SKZC` is a 0/1 **bitmap** (char N = week N); in `xswpkc` rows it's **text** (`"15-17周"`). Never parse it blindly: `_weeks_bitmap()` normalizes to bitmap-or-empty, and `_week_active(bitmap, week)` does the bounds-checked lookup. `Course.weeks_bitmap` is populated by the former; `UnscheduledCourse.weeks_text` keeps the latter. `query_courses_on_date(date)` chains `query_current_week` + `query_schedule` and filters on `week_day` + bitmap — no new endpoint involved.
 
-#### 补考办理（bkbl）— 只读
+#### 补考办理（bkbl）
 
-只封装读面（批次 + 可报名/已报名课程），报名写操作有意不接。注意点：
+读面为批次 + 可报名/已报名课程；写面仅 `signup_makeup_exam`（报名），取消报名有意不接。注意点：
 
 - 补考学期**不等于**当前学期：取系统参数 `cxxtcs.do`（`CSDM=KW&ZCSDM=BKBMXNXQ`）的 `CSZA`，`_get_makeup_term()` 是 `term=None` 时的默认来源。
 - `cxbkbmmx.do` 两个口径只差 `querySetting` 尾句：可报名 = `SFKBM=1 + KSBMZTDM notEqual 02`；已报名 = `KSBMZTDM m_value_equal 02`。
+- 报名写接口 `xgksrwxs.do` 收 `param=<JSON数组>`（`XH/KSRWID/KSBMZTDM/KSDM`，报名="02"，取消="01"）。**外层信封恒为 `code=0`**，真实结果在 `datas.xgksrwxs.extParams`：`code=="1"` 成功，其余为业务拒绝（`msg` 含原因，如「学生不在报名时间范围内」）——SDK 据此抛 `JWXTBusinessError`，不能只信外层 code。
 
 #### 全校课表（kcbcx）— Referer-gated code tables
 

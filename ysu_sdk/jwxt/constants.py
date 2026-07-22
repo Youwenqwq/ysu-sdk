@@ -68,10 +68,11 @@ API_PATHS = {
     "wdksap": "studentWdksapApp/WdksapController/cxxsksap.do",                   # 我的考试安排
     "wdksap_dqxnxq": "studentWdksapApp/modules/wdksap/dqxnxq.do",                # 当前学年学期代码（被多处复用作为默认 term）
 
-    # —— 补考办理（只读：批次与可报名课程；报名写操作不封装） ——
+    # —— 补考办理 ——
     "bkxtcs": "bkbl/modules/bkbm/cxxtcs.do",                                     # 补考报名学年学期参数
     "bkkspc": "bkbl/modules/bkbm/cxbkkspc.do",                                   # 补考考试批次
     "bkbmmx": "bkbl/modules/bkbm/cxbkbmmx.do",                                   # 补考报名明细（可报名/已报名课程）
+    "xgksrwxs": "bkbl/modules/bkbm/xgksrwxs.do",                                 # 补考报名/取消报名（写，结果以 extParams 为准）
 
     # —— 学生评教 ——
     "pjlx": "pjapp/api/wdpj/getPjlx.do",                                         # 评教类型及待评数量
