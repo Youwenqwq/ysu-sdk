@@ -679,6 +679,7 @@ class AcademicCompletion:
         completed: 已获得学分
         elective: 选修学分
         passed: 是否审查通过
+        last_calculated_at: 数据上次计算时间（``CZSJ``，RFC3339）
     """
 
     plan_name: str = ""
@@ -686,6 +687,7 @@ class AcademicCompletion:
     completed: str = ""
     elective: str = ""
     passed: bool = False
+    last_calculated_at: str = ""
     raw: dict[str, Any] = field(default_factory=dict, repr=False)
 
 

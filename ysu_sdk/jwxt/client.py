@@ -9,6 +9,7 @@ import datetime
 import functools
 import json
 import re
+import time
 from typing import Any, Callable, TypeVar
 
 import requests
@@ -1447,12 +1448,97 @@ class JWXTClient:
             :class:`AcademicCompletion`
         """
         self._ensure_weu(APP_IDS["xywccx"])
+        return _parse_academic_completion(self._query_completion_row())
 
+    @_with_lazy_reauth
+    def query_academic_completion_time(self) -> str:
+        """查询学业完成数据的上次计算时间。
+
+        Returns:
+            RFC3339 时间串（``YYYY-MM-DDTHH:MM:SS``）。
+        """
+        return self.query_academic_completion().last_calculated_at
+
+    @_with_lazy_reauth
+    def recalculate_academic_completion(
+        self,
+        *,
+        wait: bool = True,
+        timeout: float = 60.0,
+        poll_interval: float = 2.0,
+    ) -> AcademicCompletion | None:
+        """请求重新计算学业完成度（对应 ``bysc.do``，写操作）。
+
+        触发服务端重新生成学业完成数据。``wait=True``（默认）时轮询
+        ``byscjd.do`` 进度直至计算完成，随后重新查询并返回最新的
+        :class:`AcademicCompletion`；``wait=False`` 时仅触发计算并立即
+        返回 ``None``，稍后可经 :meth:`query_academic_completion` 获取结果。
+
+        Args:
+            wait: 是否等待计算完成。
+            timeout: 等待秒数上限。
+            poll_interval: 进度轮询间隔秒数。
+
+        Returns:
+            ``wait=True`` 时为重算后的 :class:`AcademicCompletion`，否则 ``None``。
+
+        Raises:
+            JWXTBusinessError: 服务端拒绝计算请求。
+            TimeoutError: ``wait=True`` 时在 ``timeout`` 秒内未完成计算。
+        """
+        self._ensure_weu(APP_IDS["xywccx"])
+
+        row = self._query_completion_row()
+        pyfadm = str(row.get("PYFADM") or "")
+        student_id = str(row.get("XH") or "")
+        if not pyfadm or not student_id:
+            raise JWXTProtocolError(
+                "recalculate_academic_completion: PYFADM/XH missing in completion row"
+            )
+
+        datas = self._post(API_PATHS["xywc_recalc"], {
+            "PYFADM": pyfadm,
+            "BYNJDM": str(row.get("BYNJDM") or "-"),
+            "SCLBDM": str(row.get("SCLBDM") or "04"),
+        })
+        result = datas.get("bysc")
+        if not isinstance(result, dict) or "code" not in result:
+            raise JWXTProtocolError(
+                "recalculate_academic_completion: malformed bysc response"
+            )
+        if str(result.get("code")) != "0":
+            raise JWXTBusinessError(
+                result.get("code"),
+                result.get("msg"),
+                _build_api_url(API_PATHS["xywc_recalc"]),
+            )
+        if not wait:
+            return None
+
+        deadline = time.monotonic() + timeout
+        progress_key = f"BYSC_{student_id}"
+        while True:
+            datas = self._post(
+                API_PATHS["xywc_recalc_progress"], {"ZXJDKEY": progress_key}
+            )
+            rows = _extract_rows(datas, "byscjd")
+            if rows:
+                total = int(rows[0].get("ZS") or 0)
+                done = int(rows[0].get("YWCS") or 0)
+                if total > 0 and done >= total:
+                    break
+            if time.monotonic() >= deadline:
+                raise TimeoutError(f"学业完成度重新计算在 {timeout} 秒内未完成")
+            time.sleep(poll_interval)
+        return self.query_academic_completion()
+
+    def _query_completion_row(self) -> dict[str, Any]:
+        """取最新一条学业完成记录原始行（调用前需已 ``_ensure_weu``）。"""
         datas = self._post(API_PATHS["xywc"], {"SCLBDM": "04", "*order": "-CZSJ"})
         rows = _extract_rows(datas, "cxxsscfa")
         if not rows:
             raise JWXTProtocolError("query_academic_completion returned empty result")
-        return _parse_academic_completion(rows[0])
+        return rows[0]
 
     # ──────────────────────────────────────────────────────────────────── #
     # 学业预警
@@ -2026,6 +2112,7 @@ def _parse_academic_completion(raw: dict[str, Any]) -> AcademicCompletion:
         completed=str(raw.get("WCXF") or ""),
         elective=str(raw.get("XKXF") or ""),
         passed=_to_bool(raw.get("JSSFTG")),
+        last_calculated_at=to_iso_datetime(raw.get("CZSJ")),
         raw=raw,
     )
 

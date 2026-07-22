@@ -60,6 +60,8 @@ API_PATHS = {
     # —— 学籍 / 培养方案 / 学业 ——
     "xsjbxx": "xsjbxxgl/modules/xsjbxx/cxxsjbxxlb.do",                           # 学生基本信息
     "xywc": "xywccx/modules/xywccx/cxxsscfa.do",                                 # 学业完成（学生所选方案完成情况）
+    "xywc_recalc": "xywccx/modules/xywccx/bysc.do",                              # 学业完成重新计算（写，触发服务端重算）
+    "xywc_recalc_progress": "xywccx/modules/xywccx/byscjd.do",                   # 学业完成重算进度（ZXJDKEY=BYSC_<XH>，YWCS>=ZS 为完成）
     "pyfa": "xsfacx/modules/pyfacxepg/grpyfacx.do",                              # 个人培养方案（第一步：拿到 PYFADM）
     "pyfa_courses": "jwpubapp/modules/pyfa/kzkccx.do",                           # 培养方案下的课程列表（第二步：传 PYFADM）
     "xyyj": "xyyj/modules/xsxyyjjg/cxxsyjpcjg.do",                               # 学业预警结果

@@ -7,7 +7,7 @@ This file provides guidance to AI coding agents when working with code in this r
 A Python SDK for Yanshan University's unified identity authentication (CAS) gateway at `cer.ysu.edu.cn` and the educational administration system (教务系统, `jwxt.ysu.edu.cn`).
 
 - `ysu_sdk.cas`: CAS login, MFA, credential persistence, and cross-`service` Service-Ticket issuance.
-- `ysu_sdk.jwxt`: Information queries for the educational administration system — grades, grade statistics/distribution/ranking (per teaching class or whole course), GPA stats, schedule (theory & experimental), unscheduled/adjusted courses, courses-on-date, exams, student info, training plan, academic completion, academic warnings, and student evaluation. **写操作仅有两个**：`submit_evaluation`（评教提交）与 `signup_makeup_exam`（补考报名）——其余公开方法均为只读。 Don't add other write surfaces (course selection, applications) without an explicit ask; this SDK is intentionally narrow.
+- `ysu_sdk.jwxt`: Information queries for the educational administration system — grades, grade statistics/distribution/ranking (per teaching class or whole course), GPA stats, schedule (theory & experimental), unscheduled/adjusted courses, courses-on-date, exams, student info, training plan, academic completion, academic warnings, and student evaluation. **写操作仅有三个**：`submit_evaluation`（评教提交）、`signup_makeup_exam`（补考报名）与 `recalculate_academic_completion`（学业完成度重算）——其余公开方法均为只读。 Don't add other write surfaces (course selection, applications) without an explicit ask; this SDK is intentionally narrow.
 - `ysu_sdk.xgxt`: Read-only queries for the student-affairs system's 综合测评 app — evaluation terms, scores with class/grade rankings, indicator details, radar comparison, year score overview, and academic report.
 
 The README is in Simplified Chinese; user-facing docstrings and exception messages should match.
@@ -135,6 +135,11 @@ In schedule rows (`cxxszhxqkb`, `querybjkb`) `SKZC` is a 0/1 **bitmap** (char N 
 - `querybjkb` / `querybjkbtk` / `querybjkbwpk` / `queryjaskb` / `queryjaskbtk` are `requestParamStr` style and share `_query_bjkb` (`id_param` switches between `BJDM` and `JASDM`).
 - 教室列表 `jscx.do` uses **`querySetting` JSON filters** (fuzzy `include` for `JASMC`, `equal` for the rest) while `XNXQDM` stays a direct form param.
 - `API_PATHS` entries starting with `/` are site-absolute and bypass `JWXT_APP_BASE` in `_build_api_url`.
+
+#### 学业完成（xywccx）—— 重算与计算时间
+
+- 完成记录行（`cxxsscfa`，按 `-CZSJ` 倒序取首行）的 `CZSJ` 即页面显示的「本数据上次计算时间」，解析为 `AcademicCompletion.last_calculated_at`（RFC3339）；`query_academic_completion_time()` 是其便捷封装。
+- 重算是**两段式写路径**：`bysc.do`（`PYFADM/BYNJDM/SCLBDM` 均取自完成记录行）触发计算，envelope 的 `datas.bysc.code==0` 才算受理（注意 `datas.bysc` 是对象不是 rows）；随后以前端同款 `byscjd.do`（`ZXJDKEY=BYSC_<XH>`）轮询进度，行内 `YWCS>=ZS` 为完成。`recalculate_academic_completion(wait=True)` 完成后会重新查询返回最新结果。
 
 #### Grade statistics/distribution/ranking — `JXBID` vs `KCH` dispatch
 
