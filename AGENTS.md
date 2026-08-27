@@ -215,6 +215,22 @@ query_evaluation_types  →  query_pending_evaluations  →  get_evaluation_deta
 - **Term model.** `CPXN` (e.g. `"2025"` = 2025-2026学年) + `CPXQ` (`"1"`/`"2"`) come in pairs from `getCpxnxq.do` (`XNXX` list, newest first). `_resolve_term(None, None)` defaults to the newest pair.
 - Lazy re-auth decorator and `XGXTSession` mirror the jwxt pattern one-for-one.
 
+### EPortal (`ysu_sdk.eportal`)
+
+锐捷 ePortal 校园网认证（`auth1.ysu.edu.cn`）：登录 / 登出 / 在线状态。**与 CAS 无关**——portal 内嵌自己的 cas-sso 登录页，仅校园网内可达。写操作（登录/登出）即本子包的存在意义。
+
+- **信封是 `code: 200`（整数）**，data 承载业务数据；`_request`/`_unwrap_json` 是唯一出口，非 200 抛 `EPortalBusinessError`。
+- **入口链路**（实测 2026-08）：`redirect.jsp?mode=history` → 302 到占位 IP（`http://124.124.124.124?mode=history`）→ **NAS 劫持**该请求并回 JS 跳转页（`top.self.location.href='/eportal/index.jsp?wlanuserip=<加密参数>&...'`）→ `index.jsp` 302 到 `portal-main?sessionId=<新>`。已在线设备例外：直接 302 到 `portal-main?sessionId=...&userOnline=true`，不经过 NAS。`_fetch_session_info` 手动跟随整条链（30x 与 `location.href=` JS 跳转两种形态都有）。
+- **NAS 劫持对请求特征敏感且严格限速**：仅带 User-Agent 不够，需要浏览器风格的 `Accept`/`Accept-Language` 头（客户端已内置默认值）；短时间多次触发后 NAS 对该设备直接丢包（ReadTimeout/ConnectTimeout），冷却可达数十分钟。**探测保持极低频**，一次登录尝试只应消耗一次入口链路。flow session 寿命长（实测 ≥50 分钟），未完成就反复开新流程会叠加卡死风险。
+- **cas-sso 登录页**：`croypto`（Base64 AES-ECB key）与 `execution`（flowkey）内嵌在 `display:none` 的 `<p>` 里，按 `id` 提取（`login-croypto` / `login-page-flowkey`），**每次渲染页面都轮换**——重试必须重抓页面。加密是 AES-ECB+PKCS7，与 CAS 网关的 AES-CBC 是两套，别复用 `cas._crypto`。
+- **`/cas-sso/api/protected/*` 需要 CSRF 头**：`Csrf-Key`=32 位随机串 a，`Csrf-Value`=MD5(base64(a) 从中点自插一次后的串)。缺头返回 `401 Invalid request`。规则在 `_make_csrf_headers`。
+- **验证码目前对所有账号强制**（`captchaCount/validate` 对不存在用户也返回 `captchaInvisible: true`）。图片地址取响应的 `captchaUrl`（相对 `/cas-sso/`），PNG 绑定 `SESSION` cookie（path `/cas-sso/`）。缺验证码提交返回错误码 `1320007`。
+- **登录失败页没有文字消息**，只有 `#login-error-msg > span` 的数字错误码，文案映射表在 `constants.LOGIN_ERROR_MESSAGES`（从前端 js 的 `codeArray1` 逆向）。成功判定看重定向链上出现 `auth-success` 或 `ticket=`。
+- **准入完成的判定看 `userOnline`（流程级）**：cas-sso 认证成功后流程通常停在服务选择节点，`serviceLogin` 后才到 finish；对已完成流程再调 `serviceLogin` 会 400 `workFlowNode is empty`。`login()` 先查 `userOnline`，已在网则跳过服务选择。
+- **`getOnlineUserInfo` 按 sessionId 出记录，无效 sessionId 返回伪造的离线记录**（`result="fail"`、`dx.failed.user.offline`）——用占位 sessionId 永远得到「离线」，是假阴性。必须先经入口链路拿到真实流程 sessionId 再查（`get_status()` 已封装）。在线时 `result="success"` 且 `onlineUser` 含认证时间。
+- **探测节奏教训**：见上面 NAS 限速。cas-sso 登录提交本身不限速，瓶颈只在入口链路的 NAS 劫持一跳。
+- **CAS 委托认证（`login_via_cas`）**：cas-sso 页面的「统一身份认证」外部提供者（`clientredirect?client_name=sidadapter`）跳 `cer.ysu.edu.cn`，ticket 回跳后完成认证。持有有效 TGC 时全程免密免验证码（已实测跨进程复用 `CASCredential` 上线）。关键依赖：必须先 GET 一次带 `flowSessionId` 的 cas-sso 登录页，把流程会话绑定到 `SESSION` cookie，否则 ticket 消费后身份不回流到 portal 流程。出票用 `cas.get_service_ticket(service_url)`（在 cas 自己的 session 上），ticket 消费在 eportal session 上——不要走 `authorize()`，它会把整串重定向吃掉且拿不到落地页做 JS 续跳判断。
+
 ### WAF / live-testing notes (learned 2026-07)
 
 `cer` / `xgxt` / `ehall` / `res` subdomains sit behind a WAF that issues `nS_*` cookies (`jwxt` is notably NOT behind it). From off-campus IPs, bursts of non-browser traffic (python-requests/curl) get connections RST'd after the TLS handshake and escalate to a **full IP block** within minutes — the block then affects browsers too. When probing live endpoints: keep volume low, sequential, browser-paced; prefer capturing traffic from a real browser session.

@@ -10,6 +10,7 @@
 - `ysu_sdk.jwmobile`：移动教务课程签到——当前课程活动、签到详情/状态查询，以及 `sign()` 签到（本包唯一写操作）。
 - `ysu_sdk.ldxt`：劳动教育实践课程管理平台（ASP.NET 服务端渲染）——劳动时长记录、学分汇总、活动报名列表，全部只读。
 - `ysu_sdk.scxt`：创新创业学分认定系统（同厂商）——学分申报记录、分批次的认定记录、学分总表、竞赛库/活动库目录，全部只读。
+- `ysu_sdk.eportal`：锐捷校园网认证（`auth1.ysu.edu.cn`）——登录、登出、在线状态查询。仅在校园网内可用，不经过 CAS 网关。
 
 ## 安装
 
@@ -328,6 +329,46 @@ comps = scxt.query_competitions(item_name="挑战杯")  # 分页目录
 本系统不是直接注册的 CAS 服务，认证经 `ysu_pt` 平台桥中转，客户端已封装
 完整握手。注意学分汇总服务端默认只给当前批次，全量请用
 `query_all_credit_records()`。
+
+## 校园网认证（ePortal）用法
+
+独立子包：不经过 CAS——锐捷门户使用内嵌的 cas-sso 登录页（AES-ECB
+加密，密钥内嵌于页面），目前所有账号登录均强制图形验证码。
+仅在校园网内可用。
+
+```python
+from ysu_sdk.eportal import EPortalClient
+
+portal = EPortalClient()
+
+status = portal.get_status()            # 无需凭据，按本机 IP 判定
+if not status.online:
+    status = portal.login(
+        "<学工号>",
+        "<密码>",
+        service="校园网",                # 或英文别名 campus/unicom/telecom/mobile
+        captcha_solver=lambda png: solve(png),  # png 为 PNG 字节流，返回识别文本
+    )
+    print(status.username, status.service, status.user_ip)
+
+portal.logout()
+```
+
+持有有效 CAS 凭据时，可以走 portal 的「统一身份认证」委托通道，
+完全免密、免验证码：
+
+```python
+from ysu_sdk.cas import CASClient, CASCredential
+from ysu_sdk.eportal import EPortalClient
+
+portal = EPortalClient()
+portal.login_via_cas(CASClient(credential=CASCredential.load()))
+```
+
+登录被拒时抛 `EPortalAuthError`，可通过 `code` 区分原因
+（`1030027`/`1030031` 用户名或密码错误、`1030028` 账号锁定、
+`1410040`/`1410041` 用户名无效）；需要验证码但未提供回调时抛
+`NeedCaptchaError`；验证码连续识别失败抛 `CaptchaFailedError`。
 
 ## 故障排查：校外网络与 WAF
 

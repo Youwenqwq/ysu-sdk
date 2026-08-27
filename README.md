@@ -24,6 +24,9 @@ gateway (`cer.ysu.edu.cn`) and educational administration system
 - `ysu_sdk.scxt` — innovation/entrepreneurship credit system (same vendor):
   credit declarations, recognized-credit records per batch, credit summary,
   competition/activity catalogs. Read-only.
+- `ysu_sdk.eportal` — campus network authentication against the Ruijie
+  ePortal (`auth1.ysu.edu.cn`): login, logout, online status. Only usable
+  from inside the campus network; does not involve the CAS gateway.
 
 ## Install
 
@@ -358,6 +361,51 @@ Authentication goes through the `ysu_pt` platform bridge (this system is not
 a directly registered CAS service); the client handles the whole handshake.
 Note the credit-record view defaults to the current batch server-side —
 `query_all_credit_records()` walks all batches.
+
+## Campus network authentication (ePortal) usage
+
+Standalone: no CAS involved — the Ruijie portal runs its own embedded
+cas-sso page (AES-ECB password encryption keyed by a page-embedded
+`croypto`, mandatory image captcha). Only reachable from inside the campus
+network.
+
+```python
+from ysu_sdk.eportal import EPortalClient
+
+portal = EPortalClient()
+
+status = portal.get_status()            # no credentials needed
+if not status.online:
+    status = portal.login(
+        "<student id>",
+        "<password>",
+        service="校园网",                # or alias: campus/unicom/telecom/mobile
+        captcha_solver=lambda png: solve(png),  # png: raw PNG bytes -> str
+    )
+    print(status.username, status.service, status.user_ip)
+
+portal.logout()
+```
+
+With a valid CAS credential the network can be authenticated without
+password or captcha at all, via the portal's delegated "统一身份认证"
+provider:
+
+```python
+from ysu_sdk.cas import CASClient, CASCredential
+from ysu_sdk.eportal import EPortalClient
+
+portal = EPortalClient()
+portal.login_via_cas(CASClient(credential=CASCredential.load()))
+```
+
+The image captcha is currently mandatory for every `login()`; `captcha_solver`
+receives the PNG bytes and returns the recognized text. Login rejections
+raise `EPortalAuthError` carrying the server's numeric `code`
+(`1030027`/`1030031` wrong credentials, `1030028` account locked,
+`1410040`/`1410041` invalid username); without a solver a mandatory captcha
+raises `NeedCaptchaError`, and repeated wrong captcha answers raise
+`CaptchaFailedError`.
 
 ## Troubleshooting: off-campus networks and the WAF
 
