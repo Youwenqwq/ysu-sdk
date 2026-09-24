@@ -2,9 +2,12 @@
 
 包含 CAS 统一身份认证（``ysu_sdk.cas``）、教务系统信息查询（``ysu_sdk.jwxt``）、
 学工系统综合测评查询（``ysu_sdk.xgxt``）、移动教务课程签到（``ysu_sdk.jwmobile``）、
-劳动教育平台查询（``ysu_sdk.ldxt``）、双创学分认定查询（``ysu_sdk.scxt``）
-与校园网认证（``ysu_sdk.eportal``）。
+劳动教育平台查询（``ysu_sdk.ldxt``）、双创学分认定查询（``ysu_sdk.scxt``）、
+校园网认证（``ysu_sdk.eportal``）、空调电费查询（``ysu_sdk.meter``）、
+一卡通余额（``ysu_sdk.ecard``）与缴费信息查询（``ysu_sdk.epay``）。
 """
+
+from __future__ import annotations
 
 __version__ = "0.6.0"
 

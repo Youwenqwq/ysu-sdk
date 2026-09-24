@@ -24,9 +24,18 @@ gateway (`cer.ysu.edu.cn`) and educational administration system
 - `ysu_sdk.scxt` — innovation/entrepreneurship credit system (same vendor):
   credit declarations, recognized-credit records per batch, credit summary,
   competition/activity catalogs. Read-only.
+- `ysu_sdk.xkjs` — innovation/entrepreneurship competition system (same
+  vendor): student and advisor search behind competition-application
+  "add student / add advisor". Read-only.
 - `ysu_sdk.eportal` — campus network authentication against the Ruijie
   ePortal (`auth1.ysu.edu.cn`): login, logout, online status. Only usable
   from inside the campus network; does not involve the CAS gateway.
+- `ysu_sdk.meter` — air-conditioner electricity (17wanxiao): bound room,
+  remaining electricity, daily/monthly usage and recharge history. Student/staff ID only; no CAS.
+- `ysu_sdk.ecard` — campus-card balance, card number, expiry and status
+  through CAS-authorized `ehall.ysu.edu.cn`. Read-only.
+- `ysu_sdk.epay` — payment history and official unpaid items through
+  CAS-authorized `epay.ysu.edu.cn`. Read-only.
 
 ## Install
 
@@ -362,6 +371,29 @@ a directly registered CAS service); the client handles the whole handshake.
 Note the credit-record view defaults to the current batch server-side —
 `query_all_credit_records()` walks all batches.
 
+## Innovation competitions (xkjs) usage
+
+```python
+from ysu_sdk.cas import CASClient, CASCredential
+from ysu_sdk.xkjs import XkjsClient
+
+xkjs = XkjsClient(CASClient(credential=CASCredential.load()))
+
+page = xkjs.search_students(name="张三")
+for s in page.items:
+    print(s.name, s.account, s.college, s.major, s.selected)
+
+for t in xkjs.search_teachers(name="李四").items:
+    print(t.name, t.account, t.college)
+```
+
+Same `ysu_pt` platform-bridge authentication as scxt (only the bridge GUID
+differs); the data plane is POST AJAX returning HTML fragments, not full
+pages. Name/account filters are exact matches; an unfiltered query returns
+nothing. CLI: `uv run python scripts/query_student.py --name 张三`
+(`--teacher` searches advisors, `--account` by student/teacher id, `--all`
+walks every page, `--json` for machine-readable output).
+
 ## Campus network authentication (ePortal) usage
 
 Standalone: no CAS involved — the Ruijie portal runs its own embedded
@@ -406,6 +438,114 @@ raise `EPortalAuthError` carrying the server's numeric `code`
 `1410040`/`1410041` invalid username); without a solver a mandatory captcha
 raises `NeedCaptchaError`, and repeated wrong captcha answers raise
 `CaptchaFailedError`.
+
+## Air-conditioner electricity (meter) usage
+
+```python
+from ysu_sdk.meter import MeterClient
+
+meter = MeterClient("<student/staff id>")
+room = meter.query_room()
+if room is not None:
+    overview = meter.query_overview(room.room_verify)
+    if overview is not None:
+        for device in overview.meters:
+            print(device.device_name, device.remaining, device.today_use, device.price)
+            for month in device.month_use:
+                print(month.month, month.use)
+    daily = meter.query_daily_use(room.room_verify, "2026-08-01", "2026-08-31")
+    recharges = meter.query_recharges(room.room_verify)
+```
+
+Remaining electricity, usage and recharge `amount` are in kWh; `price` is
+CNY/kWh and recharge `fare` is CNY. Recharge history is a read, not a recharge
+operation. This upstream protocol needs no CAS: the account ID is the query
+credential. Only query your own account or one you are authorized to access.
+`query_room()` returns `None` when unbound or missing the room query credential.
+Matching the client, a nonzero inner `result` yields `None` for the overview
+and `[]` for usage/recharge lists. Outer business rejection raises
+`MeterBusinessError`; transport, decryption and malformed responses raise
+`MeterProtocolError`.
+
+## Campus-card balance (ecard) usage
+
+```python
+from ysu_sdk.cas import CASClient, CASCredential
+from ysu_sdk.ecard import EcardClient
+
+cas = CASClient(credential=CASCredential.load())
+ecard = EcardClient(cas)
+balance = ecard.query_balance()
+if balance is not None:
+    print(balance.balance, balance.card_num, balance.available_date, balance.card_status_name)
+```
+
+Balance is in CNY. Missing balance data returns `None`; a genuine zero
+returns an `EcardBalance`. Both top-level `remining` and `datas.KNYE` are
+supported, with non-null top-level values taking precedence. `months`
+contains available months reported by the service. Invalid amounts never
+become zero. Business rejection raises `EcardBusinessError`; malformed
+responses raise `EcardProtocolError`.
+
+## Payment information (epay) usage
+
+```python
+from ysu_sdk.cas import CASClient, CASCredential
+from ysu_sdk.epay import EpayClient
+
+epay = EpayClient(CASClient(credential=CASCredential.load()))
+payments = epay.query_payments()
+for record in payments.records:
+    print(record.pay_name, record.amount_n, record.record_status, record.over_time)
+for record in payments.unpaid:
+    print("Unpaid", record.pay_name, record.amount_n)
+```
+
+Queries `allPay.html` (history) then `index.html` (pending), deduplicating by
+record ID with pending-page records taking precedence. **Use
+`payments.unpaid` to determine outstanding fees**: only official pending
+records with empty `overTime`, `status=1` and `expired=0` qualify. Filtering
+all historical records by `record_status == "unpaid"` is not equivalent.
+Normalized statuses are `paid` / `unpaid` / `closed` / `expired` / `unknown`.
+`amount_n` is numeric; `amount`, `pay_amount` and `refund_amount` preserve
+upstream display strings. A malformed page, invalid amount or `hasNextPage`
+indicating further pages raises `EpayProtocolError` instead of silently
+returning partial results. As in the current client, reading subsequent
+pages is not supported. No payment, refund or order-modification operations.
+
+All three clients accept `session=` and `timeout=` (30 seconds by default);
+data models retain `raw`. Dates/datetimes follow the SDK's
+`YYYY-MM-DD` / RFC3339 normalization; monthly usage labels such as `2026.08`
+are preserved. Ecard and epay use separate sessions, authorize through
+`CASClient.authorize()` lazily on the first query, and retry the entire query
+once after session expiry. No `JWXTClient` is required. Missing CAS login or
+repeated expiry raises the subpackage's `NotLoggedInError`; other CAS errors
+propagate unchanged. Keep queries infrequent and sequential to avoid WAF
+throttling.
+
+## Query smoke checks and offline regression
+
+```bash
+# Synthetic protocol regression: no credentials or live network
+uv run python scripts/smoke_fees_offline.py -v
+
+# Live read-only checks: run sequentially and preserve pacing
+uv run python scripts/smoke.py meter --account <student-id> --pace 1.5
+uv run python scripts/smoke.py ecard
+uv run python scripts/smoke.py epay
+
+# Export the three new sections; add --raw to retain upstream payloads
+uv run python scripts/smoke.py dump --sections meter,ecard,epay --account <student-id> -o fees.json
+```
+
+Daily electricity usage defaults to the last 30 days through today; override
+with `--start-date 2026-08-01 --end-date 2026-08-31`.
+`meter` and `dump --sections meter` neither read CAS credentials nor trigger
+login. Other authenticated modes reuse the existing credential/interactive
+login flow. `all` and the default full `dump` include the new sections and
+therefore require `--account`. An unbound room skips subsequent meter queries.
+Dump mode remains best-effort: individual failures go into the JSON `errors`
+array, not fabricated zero balances or empty payment records.
 
 ## Troubleshooting: off-campus networks and the WAF
 

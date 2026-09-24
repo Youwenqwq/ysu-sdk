@@ -11,6 +11,9 @@
 - `ysu_sdk.ldxt`：劳动教育实践课程管理平台（ASP.NET 服务端渲染）——劳动时长记录、学分汇总、活动报名列表，全部只读。
 - `ysu_sdk.scxt`：创新创业学分认定系统（同厂商）——学分申报记录、分批次的认定记录、学分总表、竞赛库/活动库目录，全部只读。
 - `ysu_sdk.eportal`：锐捷校园网认证（`auth1.ysu.edu.cn`）——登录、登出、在线状态查询。仅在校园网内可用，不经过 CAS 网关。
+- `ysu_sdk.meter`：空调电费（17wanxiao）——绑定房间、剩余电量、日/月用量及充值历史，只需学工号，不依赖 CAS。
+- `ysu_sdk.ecard`：一卡通（`ehall.ysu.edu.cn`）——余额、卡号、有效期与卡状态，通过 CAS 授权，只读。
+- `ysu_sdk.epay`：在线综合支付平台（`epay.ysu.edu.cn`）——付款历史与官方待缴清单，通过 CAS 授权，只读。
 
 ## 安装
 
@@ -369,6 +372,104 @@ portal.login_via_cas(CASClient(credential=CASCredential.load()))
 （`1030027`/`1030031` 用户名或密码错误、`1030028` 账号锁定、
 `1410040`/`1410041` 用户名无效）；需要验证码但未提供回调时抛
 `NeedCaptchaError`；验证码连续识别失败抛 `CaptchaFailedError`。
+
+## 空调电费（meter）用法
+
+```python
+from ysu_sdk.meter import MeterClient
+
+meter = MeterClient("<学工号>")
+room = meter.query_room()
+if room is not None:
+    overview = meter.query_overview(room.room_verify)
+    if overview is not None:
+        for device in overview.meters:
+            print(device.device_name, device.remaining, device.today_use, device.price)
+            for month in device.month_use:
+                print(month.month, month.use)
+    daily = meter.query_daily_use(room.room_verify, "2026-08-01", "2026-08-31")
+    recharges = meter.query_recharges(room.room_verify)
+```
+
+`remaining`、`today_use`、日/月用量和充值记录的 `amount` 单位均为度；
+`price` 为元/度，充值记录的 `fare` 为元。充值历史只是查询，不会执行充值。
+接口无需 CAS，学工号即查询凭据，请仅用于本人或已获授权的账号。
+`query_room()` 未绑定或缺少房间查询凭据时返回 `None`。
+沿用客户端协议，内层业务 `result` 非零时，概览返回 `None`，用量/充值列表返回 `[]`；
+外层业务拒绝抛 `MeterBusinessError`，网络、解密或报文损坏抛 `MeterProtocolError`。
+
+## 一卡通余额（ecard）用法
+
+```python
+from ysu_sdk.cas import CASClient, CASCredential
+from ysu_sdk.ecard import EcardClient
+
+cas = CASClient(credential=CASCredential.load())
+ecard = EcardClient(cas)
+balance = ecard.query_balance()
+if balance is not None:
+    print(balance.balance, balance.card_num, balance.available_date, balance.card_status_name)
+```
+
+余额单位为元。缺少余额数据返回 `None`，真实零余额仍返回 `EcardBalance`。
+同时兼容顶层 `remining` 和 `datas.KNYE`，前者非空时优先。
+`months` 保存上游返回的可用月份。无效金额不会被转成零；
+有效业务拒绝抛 `EcardBusinessError`，无效报文抛 `EcardProtocolError`。
+
+## 缴费信息（epay）用法
+
+```python
+from ysu_sdk.cas import CASClient, CASCredential
+from ysu_sdk.epay import EpayClient
+
+epay = EpayClient(CASClient(credential=CASCredential.load()))
+payments = epay.query_payments()
+for record in payments.records:
+    print(record.pay_name, record.amount_n, record.record_status, record.over_time)
+for record in payments.unpaid:
+    print("待缴", record.pay_name, record.amount_n)
+```
+
+顺序读取 `allPay.html`（历史）与 `index.html`（我的待付款），按记录 ID 去重，
+同 ID 优先保留待付款页面记录。**欠费判断使用 `payments.unpaid`**：
+只包含官方待付款页面中 `overTime` 为空、`status=1`、`expired=0` 的记录，
+不能用全量历史记录的 `record_status == "unpaid"` 代替。
+归一状态为 `paid` / `unpaid` / `closed` / `expired` / `unknown`；
+`amount_n` 为数值金额，`amount` / `pay_amount` / `refund_amount` 保留原始展示字符串。
+任一页面损坏、金额无效或 `hasNextPage` 表示还有后续分页时，
+抛 `EpayProtocolError`，不会静默返回部分清单。分页能力与当前客户端一致，
+尚不支持继续读取后续页。不提供支付、退款或订单修改接口。
+
+三个客户端都支持 `session=` 与 `timeout=`（默认 30 秒），数据模型保留 `raw`。
+日期/日期时间沿用 SDK 的 `YYYY-MM-DD` / RFC3339 归一规则；
+月度用电的年月字符串（如 `2026.08`）原样保留。
+一卡通与缴费客户端各自持有独立会话，首次查询才调用 `CASClient.authorize()`，
+接口报告登录失效时重新授权并将整次查询重试一次，不需要先创建 `JWXTClient`。
+未登录或再次失效抛各自子包的 `NotLoggedInError`，其他 CAS 异常保留原类型。
+查询保持低频、顺序执行，避免触发网关限流。
+
+## 查询冒烟与离线回归
+
+```bash
+# 离线协议回归：合成数据，无需凭据，不访问学校服务器
+uv run python scripts/smoke_fees_offline.py -v
+
+# 活网只读查询：请顺序执行，保留请求间隔
+uv run python scripts/smoke.py meter --account <学工号> --pace 1.5
+uv run python scripts/smoke.py ecard
+uv run python scripts/smoke.py epay
+
+# 导出三个新板块；--raw 可附带原始响应
+uv run python scripts/smoke.py dump --sections meter,ecard,epay --account <学工号> -o fees.json
+```
+
+水电日用量默认查询截至今天的近 30 天，可指定
+`--start-date 2026-08-01 --end-date 2026-08-31`。
+`meter` 和 `dump --sections meter` 不读取 CAS 凭据或触发登录；
+其他需要认证的模式沿用本地 CAS 凭据及交互式登录。
+`all` 和默认全量 `dump` 已包含三个新板块，因包含水电查询，必须提供 `--account`。
+未绑定房间会跳过后续水电查询；`dump` 保持尽力导出，单项失败记入 JSON 的
+`errors`，不会把查询失败伪装成零余额或空账单。
 
 ## 故障排查：校外网络与 WAF
 

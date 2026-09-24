@@ -6,13 +6,22 @@
     uv run python scripts/smoke.py cas              # 只测 CAS
     uv run python scripts/smoke.py jwxt             # 只测教务
     uv run python scripts/smoke.py xgxt             # 只测学工（综合测评）
-    uv run python scripts/smoke.py all --pace 1.5   # 全部，自定义请求间隔
-    uv run python scripts/smoke.py dump             # 导出 SDK 能提供的全部数据到 JSON
+    uv run python scripts/smoke.py meter --account <学工号>  # 无需 CAS
+    uv run python scripts/smoke.py ecard            # 一卡通余额
+    uv run python scripts/smoke.py epay             # 缴费历史与官方待缴
+    uv run python scripts/smoke.py all --account <学工号> --pace 1.5
+    uv run python scripts/smoke.py dump --account <学工号>  # 全量 JSON
+    uv run python scripts/smoke.py dump --sections ecard,epay -o fees.json
+    uv run python scripts/smoke.py dump --sections meter --account <学工号>
+    uv run python scripts/smoke_fees_offline.py      # 无网络的协议回归
 
 认证::
 
     默认读取 ``~/.config/ysu-sdk/cas.json``；文件不存在或已失效时进入
     交互式登录（验证码图片写入 /tmp，MFA 走终端输入），成功后自动保存。
+    meter 以及仅导出 meter 时不读取 CAS 凭据、不触发登录。
+    包含 meter 的模式必须提供 --account；用电区间默认截至今天的近 30 天，
+    可通过 --start-date / --end-date 指定。仅查询本人或已获授权的账号。
 
 注意::
 
@@ -30,7 +39,7 @@ import sys
 import time
 from dataclasses import fields as dataclass_fields
 from dataclasses import is_dataclass
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any, Callable
 
@@ -41,8 +50,12 @@ from ysu_sdk.cas import (
     CaptchaChallenge,
     MFAChallenge,
 )
+from ysu_sdk.ecard import EcardError
+from ysu_sdk.epay import EpayError
+from ysu_sdk.meter import MeterError
 
 CAPTCHA_PATH = Path("/tmp/ysu_sdk_captcha.png")
+DUMP_SECTIONS = {"jwxt", "xgxt", "ldxt", "scxt", "meter", "ecard", "epay"}
 
 _pace_seconds = 1.0
 
@@ -269,6 +282,74 @@ def smoke_scxt(cas: CASClient) -> None:
 
 
 # ──────────────────────────────────────────────────────────────────────────── #
+# 空调电费、一卡通与缴费（全部只读）
+# ──────────────────────────────────────────────────────────────────────────── #
+
+
+def smoke_meter(account: str, start_date: str, end_date: str) -> None:
+    from ysu_sdk.meter import MeterClient
+
+    print("== 空调电费（meter） ==")
+    meter = MeterClient(account)
+    room = meter.query_room()
+    if room is None:
+        ok("未绑定房间或缺少房间查询凭据，跳过后续用电查询")
+        return
+    ok(f"绑定房间: {room.room_full_name}")
+    pace()
+
+    overview = meter.query_overview(room.room_verify)
+    if overview is None:
+        print("  [SKIP] 电表概览不可用（内层业务 result 非零）")
+    else:
+        ok(f"电表概览: {len(overview.meters)} 路")
+        for device in overview.meters:
+            print(f"    {device.device_name}: 剩余={device.remaining}度 "
+                  f"今日={device.today_use}度 电价={device.price}元/度 {device.line_desc}")
+            for month in device.month_use:
+                print(f"      {month.month}: {month.use}度")
+    pace()
+
+    daily = meter.query_daily_use(room.room_verify, start_date, end_date)
+    ok(f"日用量 {start_date} 至 {end_date}: {len(daily)} 条，"
+       f"合计={sum(day.use for day in daily):.2f}度")
+    pace()
+
+    recharges = meter.query_recharges(room.room_verify)
+    ok(f"充值历史（只读）: {len(recharges)} 条，"
+       f"电量={sum(record.amount for record in recharges):.2f}度，"
+       f"金额={sum(record.fare for record in recharges):.2f}元")
+
+
+def smoke_ecard(cas: CASClient) -> None:
+    from ysu_sdk.ecard import EcardClient
+
+    print("== 一卡通（ecard） ==")
+    balance = EcardClient(cas).query_balance()
+    if balance is None:
+        ok("暂无一卡通余额数据（不代表零余额）")
+        return
+    ok(f"余额={balance.balance:.2f}元 卡号={balance.card_num} "
+       f"有效期={balance.available_date} 状态={balance.card_status_name}")
+    print(f"    可用月份: {', '.join(balance.months)}")
+
+
+def smoke_epay(cas: CASClient) -> None:
+    from ysu_sdk.epay import EpayClient
+
+    print("== 缴费信息（epay） ==")
+    payments = EpayClient(cas).query_payments()
+    ok(f"付款记录: {len(payments.records)} 条")
+    for record in payments.records:
+        print(f"    {record.pay_name}: {record.amount_n:.2f}元 "
+              f"状态={record.record_status} 完成时间={record.over_time or '无'}")
+    ok(f"官方待缴: {len(payments.unpaid)} 笔，"
+       f"合计={sum(record.amount_n for record in payments.unpaid):.2f}元")
+    for record in payments.unpaid:
+        print(f"    待缴: {record.pay_name} {record.amount_n:.2f}元")
+
+
+# ──────────────────────────────────────────────────────────────────────────── #
 # 全量数据导出
 # ──────────────────────────────────────────────────────────────────────────── #
 
@@ -292,25 +373,41 @@ def _to_jsonable(obj: Any, *, include_raw: bool = False) -> Any:
     return obj
 
 
-def smoke_dump(cas: CASClient, term: str | None, output: Path, *, include_raw: bool = False, sections: set[str] | None = None) -> None:
+def smoke_dump(
+    cas: CASClient | None,
+    term: str | None,
+    output: Path,
+    *,
+    account: str | None,
+    start_date: str,
+    end_date: str,
+    include_raw: bool = False,
+    sections: set[str] | None = None,
+) -> None:
     """把 SDK 全部只读方法的数据导出到 JSON 文件。
 
     尽力而为：单个方法失败（如「未到评教时间」）不中断，记入 ``errors`` 字段。
-    会产生较多请求（约 40 个），调用间隔受 ``--pace`` 控制。
+    请求数量取决于所选板块，调用间隔受 ``--pace`` 控制。
     """
     from ysu_sdk.jwxt import JWXTClient
     from ysu_sdk.ldxt import LdxtClient
     from ysu_sdk.scxt import ScxtClient
     from ysu_sdk.xgxt import XGXTClient
+    from ysu_sdk.ecard import EcardClient
+    from ysu_sdk.epay import EpayClient
+    from ysu_sdk.meter import MeterClient
 
     dump: dict[str, Any] = {
         "generated_at": datetime.now().isoformat(timespec="seconds"),
         "term": term,
-        "cas": {"authenticated": True},
+        "cas": {"authenticated": True if cas is not None else None},
         "jwxt": {},
         "xgxt": {},
         "ldxt": {},
         "scxt": {},
+        "meter": {},
+        "ecard": {},
+        "epay": {},
         "errors": [],
     }
 
@@ -334,104 +431,129 @@ def smoke_dump(cas: CASClient, term: str | None, output: Path, *, include_raw: b
     print("== 全量导出 ==")
 
     # ── JWXT ──
-    jwxt = JWXTClient(cas)
-    collect("jwxt", "student_info", jwxt.query_student_info)
-    grades = collect("jwxt", "grades", lambda: jwxt.query_grades(term=term))
-    collect("jwxt", "gpa_stats", jwxt.query_gpa_stats)
-    collect("jwxt", "schedule", lambda: jwxt.query_schedule(term=term))
-    collect("jwxt", "schedule_experimental", lambda: jwxt.query_schedule_experimental(term=term))
-    collect("jwxt", "unscheduled_courses", lambda: jwxt.query_unscheduled_courses(term=term))
-    collect("jwxt", "class_periods", jwxt.query_class_periods)
-    collect("jwxt", "term_calendar", lambda: jwxt.query_term_calendar(term=term))
-    collect("jwxt", "current_week", lambda: jwxt.query_current_week(term=term))
-    collect("jwxt", "exams", lambda: jwxt.query_exams(term=term))
-    collect("jwxt", "training_plan", jwxt.query_training_plan)
-    collect("jwxt", "academic_completion", jwxt.query_academic_completion)
-    collect("jwxt", "academic_warnings", jwxt.query_academic_warnings)
-    collect("jwxt", "unscheduled_theory_courses", lambda: jwxt.query_unscheduled_theory_courses(term=term))
-    collect("jwxt", "adjusted_courses", lambda: jwxt.query_adjusted_courses(term=term))
-    collect("jwxt", "overall_adjustments", lambda: jwxt.query_overall_adjustments(term=term))
-    collect("jwxt", "courses_on_date", lambda: jwxt.query_courses_on_date(term=term))
-    collect("jwxt", "makeup_exam_batches", lambda: jwxt.query_makeup_exam_batches())
-    collect("jwxt", "makeup_exam_courses", lambda: jwxt.query_makeup_exam_courses())
-    collect("jwxt", "grade_years", jwxt.query_grade_years)
-    collect("jwxt", "departments", jwxt.query_departments)
-    collect("jwxt", "majors", jwxt.query_majors)
-    class_list = collect("jwxt", "class_list", lambda: jwxt.query_class_list(term=term))
-    if class_list:
-        first_class = class_list[0]
-        collect("jwxt", "class_schedule_sample",
-                lambda: jwxt.query_class_schedule(first_class.class_id, term=term))
-        collect("jwxt", "class_unscheduled_sample",
-                lambda: jwxt.query_class_unscheduled_courses(first_class.class_id, term=term))
-    collect("jwxt", "campuses", jwxt.query_campuses)
-    collect("jwxt", "teaching_buildings", lambda: jwxt.query_teaching_buildings())
-    classrooms = collect("jwxt", "classrooms", lambda: jwxt.query_classrooms(term=term, scheduled=True))
-    if classrooms:
-        first_room = classrooms[0]
-        collect("jwxt", "classroom_schedule_sample",
-                lambda: jwxt.query_classroom_schedule(first_room.code, term=term))
+    if sections is None or "jwxt" in sections:
+        jwxt = JWXTClient(cas)
+        collect("jwxt", "student_info", jwxt.query_student_info)
+        grades = collect("jwxt", "grades", lambda: jwxt.query_grades(term=term))
+        collect("jwxt", "gpa_stats", jwxt.query_gpa_stats)
+        collect("jwxt", "schedule", lambda: jwxt.query_schedule(term=term))
+        collect("jwxt", "schedule_experimental", lambda: jwxt.query_schedule_experimental(term=term))
+        collect("jwxt", "unscheduled_courses", lambda: jwxt.query_unscheduled_courses(term=term))
+        collect("jwxt", "class_periods", jwxt.query_class_periods)
+        collect("jwxt", "term_calendar", lambda: jwxt.query_term_calendar(term=term))
+        collect("jwxt", "current_week", lambda: jwxt.query_current_week(term=term))
+        collect("jwxt", "exams", lambda: jwxt.query_exams(term=term))
+        collect("jwxt", "training_plan", jwxt.query_training_plan)
+        collect("jwxt", "academic_completion", jwxt.query_academic_completion)
+        collect("jwxt", "academic_warnings", jwxt.query_academic_warnings)
+        collect("jwxt", "unscheduled_theory_courses", lambda: jwxt.query_unscheduled_theory_courses(term=term))
+        collect("jwxt", "adjusted_courses", lambda: jwxt.query_adjusted_courses(term=term))
+        collect("jwxt", "overall_adjustments", lambda: jwxt.query_overall_adjustments(term=term))
+        collect("jwxt", "courses_on_date", lambda: jwxt.query_courses_on_date(term=term))
+        collect("jwxt", "makeup_exam_batches", lambda: jwxt.query_makeup_exam_batches())
+        collect("jwxt", "makeup_exam_courses", lambda: jwxt.query_makeup_exam_courses())
+        collect("jwxt", "grade_years", jwxt.query_grade_years)
+        collect("jwxt", "departments", jwxt.query_departments)
+        collect("jwxt", "majors", jwxt.query_majors)
+        class_list = collect("jwxt", "class_list", lambda: jwxt.query_class_list(term=term))
+        if class_list:
+            first_class = class_list[0]
+            collect("jwxt", "class_schedule_sample",
+                    lambda: jwxt.query_class_schedule(first_class.class_id, term=term))
+            collect("jwxt", "class_unscheduled_sample",
+                    lambda: jwxt.query_class_unscheduled_courses(first_class.class_id, term=term))
+        collect("jwxt", "campuses", jwxt.query_campuses)
+        collect("jwxt", "teaching_buildings", lambda: jwxt.query_teaching_buildings())
+        classrooms = collect("jwxt", "classrooms", lambda: jwxt.query_classrooms(term=term, scheduled=True))
+        if classrooms:
+            first_room = classrooms[0]
+            collect("jwxt", "classroom_schedule_sample",
+                    lambda: jwxt.query_classroom_schedule(first_room.code, term=term))
 
-    # 成绩统计/分布/排名：以第一门成绩为样本，两种口径各调一次
-    if grades:
-        sample = grades[0]
-        if sample.class_id:
-            collect("jwxt", "grade_statistics_class",
-                    lambda: jwxt.query_grade_statistics(term=term, class_id=sample.class_id))
-            collect("jwxt", "grade_distribution_class",
-                    lambda: jwxt.query_grade_distribution(term=term, class_id=sample.class_id))
-            collect("jwxt", "grade_ranking_class",
-                    lambda: jwxt.query_grade_ranking(term=term, class_id=sample.class_id))
-        if sample.course_code:
-            collect("jwxt", "grade_statistics_course",
-                    lambda: jwxt.query_grade_statistics(term=term, course_code=sample.course_code))
-            collect("jwxt", "grade_distribution_course",
-                    lambda: jwxt.query_grade_distribution(term=term, course_code=sample.course_code))
-            collect("jwxt", "grade_ranking_course",
-                    lambda: jwxt.query_grade_ranking(term=term, course_code=sample.course_code))
+        # 成绩统计/分布/排名：以第一门成绩为样本，两种口径各调一次
+        if grades:
+            sample = grades[0]
+            if sample.class_id:
+                collect("jwxt", "grade_statistics_class",
+                        lambda: jwxt.query_grade_statistics(term=term, class_id=sample.class_id))
+                collect("jwxt", "grade_distribution_class",
+                        lambda: jwxt.query_grade_distribution(term=term, class_id=sample.class_id))
+                collect("jwxt", "grade_ranking_class",
+                        lambda: jwxt.query_grade_ranking(term=term, class_id=sample.class_id))
+            if sample.course_code:
+                collect("jwxt", "grade_statistics_course",
+                        lambda: jwxt.query_grade_statistics(term=term, course_code=sample.course_code))
+                collect("jwxt", "grade_distribution_course",
+                        lambda: jwxt.query_grade_distribution(term=term, course_code=sample.course_code))
+                collect("jwxt", "grade_ranking_course",
+                        lambda: jwxt.query_grade_ranking(term=term, course_code=sample.course_code))
 
-    # 评教：只读部分（提交相关一律不碰）
-    eval_types = collect("jwxt", "evaluation_types", lambda: jwxt.query_evaluation_types(term=term))
-    if eval_types:
-        first_type = eval_types[0]
-        pending = collect(
-            "jwxt", "evaluation_pending",
-            lambda: jwxt.query_pending_evaluations(first_type.code, term=term),
-        )
-        if pending:
-            task = pending[0]
-            collect("jwxt", "evaluation_detail_sample",
-                    lambda: jwxt.get_evaluation_detail(task.group_no, first_type.code))
+        # 评教：只读部分（提交相关一律不碰）
+        eval_types = collect("jwxt", "evaluation_types", lambda: jwxt.query_evaluation_types(term=term))
+        if eval_types:
+            first_type = eval_types[0]
+            pending = collect(
+                "jwxt", "evaluation_pending",
+                lambda: jwxt.query_pending_evaluations(first_type.code, term=term),
+            )
+            if pending:
+                task = pending[0]
+                collect("jwxt", "evaluation_detail_sample",
+                        lambda: jwxt.get_evaluation_detail(task.group_no, first_type.code))
 
     # ── XGXT ──
-    xgxt = XGXTClient(cas)
-    cp_terms = collect("xgxt", "evaluation_terms", xgxt.query_evaluation_terms) or []
-    for t in cp_terms:
-        key = f"{t.year}-{t.term}"
-        collect("xgxt", f"evaluation_result[{key}]", lambda t=t: xgxt.query_evaluation_result(t.year, t.term))
-        collect("xgxt", f"evaluation_indicators[{key}]", lambda t=t: xgxt.query_evaluation_indicators(t.year, t.term))
-        collect("xgxt", f"evaluation_radar[{key}]", lambda t=t: xgxt.query_evaluation_radar(t.year, t.term))
-    collect("xgxt", "year_score_statics", xgxt.query_year_score_statics)
-    report_years = collect("xgxt", "academic_report_years", xgxt.query_academic_report_years)
-    if report_years:
-        for y in report_years.years:
-            collect("xgxt", f"academic_report[{y.year}]",
-                    lambda y=y: xgxt.query_academic_report(y.year))
+    if sections is None or "xgxt" in sections:
+        xgxt = XGXTClient(cas)
+        cp_terms = collect("xgxt", "evaluation_terms", xgxt.query_evaluation_terms) or []
+        for t in cp_terms:
+            key = f"{t.year}-{t.term}"
+            collect("xgxt", f"evaluation_result[{key}]", lambda t=t: xgxt.query_evaluation_result(t.year, t.term))
+            collect("xgxt", f"evaluation_indicators[{key}]", lambda t=t: xgxt.query_evaluation_indicators(t.year, t.term))
+            collect("xgxt", f"evaluation_radar[{key}]", lambda t=t: xgxt.query_evaluation_radar(t.year, t.term))
+        collect("xgxt", "year_score_statics", xgxt.query_year_score_statics)
+        report_years = collect("xgxt", "academic_report_years", xgxt.query_academic_report_years)
+        if report_years:
+            for y in report_years.years:
+                collect("xgxt", f"academic_report[{y.year}]",
+                        lambda y=y: xgxt.query_academic_report(y.year))
 
     # ── Ldxt（劳动教育）──
-    ldxt = LdxtClient(cas)
-    collect("ldxt", "labor_records", ldxt.query_labor_records)
-    collect("ldxt", "labor_summary", ldxt.query_labor_summary)
-    collect("ldxt", "enrollable_activities", ldxt.query_enrollable_activities)
+    if sections is None or "ldxt" in sections:
+        ldxt = LdxtClient(cas)
+        collect("ldxt", "labor_records", ldxt.query_labor_records)
+        collect("ldxt", "labor_summary", ldxt.query_labor_summary)
+        collect("ldxt", "enrollable_activities", ldxt.query_enrollable_activities)
 
     # ── Scxt（双创学分）──
-    scxt = ScxtClient(cas)
-    collect("scxt", "credit_declarations", scxt.query_credit_declarations)
-    collect("scxt", "credit_summary", scxt.query_credit_summary)
-    collect("scxt", "credit_batches", scxt.query_credit_batches)
-    collect("scxt", "credit_records_all", scxt.query_all_credit_records)
-    collect("scxt", "competitions_page1", scxt.query_competitions)
-    collect("scxt", "activities_page1", scxt.query_activities)
+    if sections is None or "scxt" in sections:
+        scxt = ScxtClient(cas)
+        collect("scxt", "credit_declarations", scxt.query_credit_declarations)
+        collect("scxt", "credit_summary", scxt.query_credit_summary)
+        collect("scxt", "credit_batches", scxt.query_credit_batches)
+        collect("scxt", "credit_records_all", scxt.query_all_credit_records)
+        collect("scxt", "competitions_page1", scxt.query_competitions)
+        collect("scxt", "activities_page1", scxt.query_activities)
+
+    # ── 空调电费 ──
+    if sections is None or "meter" in sections:
+        if not account:
+            raise ValueError("空调电费查询需要提供学工号")
+        meter = MeterClient(account)
+        dump["meter"]["date_range"] = {"start_date": start_date, "end_date": end_date}
+        room = collect("meter", "room", meter.query_room)
+        if room is not None:
+            collect("meter", "overview", lambda: meter.query_overview(room.room_verify))
+            collect("meter", "daily_use",
+                    lambda: meter.query_daily_use(room.room_verify, start_date, end_date))
+            collect("meter", "recharges", lambda: meter.query_recharges(room.room_verify))
+
+    # ── 一卡通与缴费 ──
+    if sections is None or "ecard" in sections:
+        ecard = EcardClient(cas)
+        collect("ecard", "balance", ecard.query_balance)
+    if sections is None or "epay" in sections:
+        epay = EpayClient(cas)
+        collect("epay", "payments", epay.query_payments)
 
     output.write_text(json.dumps(dump, ensure_ascii=False, indent=2), encoding="utf-8")
     print(f"\n已写入 {output}（{len(dump['errors'])} 个方法被跳过，详见 errors 字段）")
@@ -441,27 +563,55 @@ def main() -> int:
     parser = argparse.ArgumentParser(
         description="ysu-sdk 各模块活网冒烟（请求间隔默认 1s，勿调太低以免触发 WAF）"
     )
-    parser.add_argument("module", choices=["cas", "jwxt", "xgxt", "mobile", "ldxt", "scxt", "all", "dump"])
+    parser.add_argument("module", choices=[
+        "cas", "jwxt", "xgxt", "mobile", "ldxt", "scxt",
+        "meter", "ecard", "epay", "all", "dump",
+    ])
     parser.add_argument("--pace", type=float, default=1.0, metavar="SECONDS",
                         help="每组请求之间的间隔秒数（默认 1.0）")
     parser.add_argument("--term", default=None,
                         help="JWXT 查询的学年学期代码（如 2025-2026-1），默认当前学期")
     parser.add_argument("--login", action="store_true",
                         help="忽略本地凭据，强制交互式登录")
+    parser.add_argument("--account", default=None, metavar="ID",
+                        help="空调电费查询的学工号（meter、all 或包含 meter 的 dump 必填）")
+    parser.add_argument("--start-date", type=date.fromisoformat, default=None, metavar="YYYY-MM-DD",
+                        help="日用量起始日期（默认结束日期前 29 天）")
+    parser.add_argument("--end-date", type=date.fromisoformat, default=None, metavar="YYYY-MM-DD",
+                        help="日用量结束日期（默认今天）")
     parser.add_argument("--output", "-o", default=None, metavar="FILE",
                         help="dump 模式的输出文件（默认 ysu_dump_<时间戳>.json）")
     parser.add_argument("--raw", action="store_true",
                         help="dump 模式附带接口原始响应（raw 字段），默认只导出封装字段")
     parser.add_argument("--sections", default=None, metavar="LIST",
-                        help="dump 模式只导出指定板块，逗号分隔（如 jwxt,ldxt），默认全部")
+                        help="dump 板块，逗号分隔：jwxt,xgxt,ldxt,scxt,meter,ecard,epay（默认全部）")
     args = parser.parse_args()
+    sections = None
+    if args.module == "dump" and args.sections is not None:
+        sections = {s.strip() for s in args.sections.split(",") if s.strip()}
+        if not sections or sections - DUMP_SECTIONS:
+            parser.error("--sections 必须是有效板块列表：" + ",".join(sorted(DUMP_SECTIONS)))
+    needs_meter = args.module in ("meter", "all") or (
+        args.module == "dump" and (sections is None or "meter" in sections)
+    )
+    account = args.account.strip() if args.account else None
+    if needs_meter and not account:
+        parser.error("包含 meter 的查询必须提供 --account <学工号>")
+    end_date = args.end_date or date.today()
+    start_date = args.start_date or end_date - timedelta(days=29)
+    if start_date > end_date:
+        parser.error("--start-date 不能晚于 --end-date")
+    requires_cas = args.module != "meter" and not (
+        args.module == "dump" and sections == {"meter"}
+    )
 
     global _pace_seconds
     _pace_seconds = max(args.pace, 0.0)
 
     try:
-        cas = build_cas(force_login=args.login)
-        pace()
+        cas = build_cas(force_login=args.login) if requires_cas else None
+        if requires_cas:
+            pace()
         if args.module in ("cas", "all"):
             smoke_cas(cas)
             pace()
@@ -480,17 +630,25 @@ def main() -> int:
         if args.module in ("scxt", "all"):
             smoke_scxt(cas)
             pace()
+        if needs_meter and args.module != "dump":
+            smoke_meter(account, start_date.isoformat(), end_date.isoformat())
+            pace()
+        if args.module in ("ecard", "all"):
+            smoke_ecard(cas)
+            pace()
+        if args.module in ("epay", "all"):
+            smoke_epay(cas)
+            pace()
         if args.module == "dump":
             output = Path(args.output) if args.output else Path(
                 f"ysu_dump_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
             )
-            sections = (
-                {s.strip() for s in args.sections.split(",") if s.strip()}
-                if args.sections
-                else None
+            smoke_dump(
+                cas, args.term, output, account=account,
+                start_date=start_date.isoformat(), end_date=end_date.isoformat(),
+                include_raw=args.raw, sections=sections,
             )
-            smoke_dump(cas, args.term, output, include_raw=args.raw, sections=sections)
-    except CASError as exc:
+    except (CASError, MeterError, EcardError, EpayError) as exc:
         print(f"\n[FAIL] {type(exc).__name__}: {exc}", file=sys.stderr)
         return 1
     print("\nSMOKE OK")
